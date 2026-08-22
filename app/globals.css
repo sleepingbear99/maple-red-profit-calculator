@@ -696,3 +696,134 @@ tbody tr:hover { background: #faf7f3; }
   .modal { width: 100%; max-height: 100vh; min-height: 100vh; border-radius: 0; }
   footer > small { display: none; }
 }
+
+/* Readability scale: preserve layout while raising every decision-relevant label. */
+body { font-size: 15px; }
+
+.brand strong,
+.lead,
+.search-box input,
+td,
+td strong,
+.product-name,
+.comparison,
+.plan-summary dd,
+.formula-block dd,
+footer p strong {
+  font-size: 15px;
+}
+
+.topbar nav a,
+.text-button,
+.hero-notes,
+.quiet,
+.number-field,
+.select-field,
+.number-control small,
+.affix-input small,
+.switch-row b,
+.switch-row small,
+.best-card p,
+.metric span,
+.verdict > span,
+.best-detail,
+.lower-is-better,
+.primary-button,
+.secondary-button,
+.danger-button,
+.filter-tabs button,
+.sort-control,
+th,
+.rank,
+.inline-select,
+.empty-state p,
+.planner-intro,
+.goal-field p,
+.goal-input b,
+.plan-list-head span:first-child,
+.quantity-control,
+.add-row-button,
+.empty-plan,
+.summary-hero span,
+.plan-summary dt,
+.modal-lead,
+.detail-title-row p,
+.price-warning strong,
+.price-warning span,
+.detail-result span,
+.detail-result small,
+.formula-block dt,
+.detail-note p,
+.editor-grid > label:not(.editor-check),
+.editor-check b,
+.toast {
+  font-size: 14px;
+}
+
+.brand small,
+.save-state,
+.eyebrow,
+.hero-notes i,
+.section-heading p,
+.step,
+.metric em,
+.verdict small,
+td small,
+.product-meta,
+.warning-line,
+.yes-chip,
+.no-chip,
+.result-chip,
+.date-value,
+.table-footnote,
+.progress-copy,
+.plan-list-head,
+.plan-number,
+.plan-row label small,
+.mini-check,
+.limit-warning,
+.summary-hero small,
+.remaining-box span,
+.remaining-box small,
+.summary-note,
+footer p span,
+footer > small,
+.formula-block dd small,
+.detail-note span,
+.editor-check small {
+  font-size: 13px;
+}
+
+.comparison { font-size: 15px !important; }
+.date-value { font-size: 13px !important; }
+.planner-intro { font-size: 15px !important; }
+
+.select-field select,
+.sort-control select,
+.plan-row select,
+.editor-grid select {
+  font-size: 15px;
+}
+
+.number-control input,
+.affix-input input,
+.quantity-control input,
+.editor-grid input:not([type="checkbox"]),
+.editor-grid textarea {
+  font-size: 16px;
+}
+
+.emphasis strong { font-size: 17px; }
+.formula-block h3 { font-size: 16px; }
+.formula-block .formula-final dd { font-size: 22px; }
+.metric strong small { font-size: 14px; }
+
+@media (max-width: 760px) {
+  body { font-size: 14px; }
+  .lead { font-size: 15px; }
+  .number-control input,
+  .affix-input input,
+  .quantity-control input,
+  .editor-grid input:not([type="checkbox"]),
+  .editor-grid textarea { font-size: 16px; }
+}
