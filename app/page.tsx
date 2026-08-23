@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ALL_CATALOG_PRODUCTS,
   CATEGORY_LABELS,
@@ -372,6 +372,7 @@ export default function Home() {
   const [activeOnly, setActiveOnly] = useState(false);
   const [profitFilter, setProfitFilter] = useState<ProfitFilter>("all");
   const [sort, setSort] = useState<SortKey>("base");
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [editor, setEditor] = useState<ProductDraft | null>(null);
   const [notice, setNotice] = useState("");
@@ -468,6 +469,12 @@ export default function Home() {
       });
   }, [products, priceData, search, categoryFilter, subcategoryFilter, mileageFilter, activeOnly, profitFilter, sort, settings]);
 
+  useEffect(() => {
+    if (expandedProductId && !rankedProducts.some((product) => product.id === expandedProductId)) {
+      setExpandedProductId(null);
+    }
+  }, [expandedProductId, rankedProducts]);
+
   const bestProduct = useMemo(() => {
     return products
       .filter((product) => product.category !== "reference" && product.active && selectedPrice(product, getProductPrice(priceData, product)) > 0)
@@ -518,6 +525,43 @@ export default function Home() {
       ...current,
       [id]: { ...getProductPrice(current, product), ...changes },
     }));
+  };
+
+  const updateComponentMarketPrice = (
+    productId: string,
+    componentId: string,
+    key: keyof ComponentMarketPrice,
+    value: number | null,
+  ) => {
+    const product = products.find((candidate) => candidate.id === productId);
+    if (!product) return;
+    setPriceData((current) => {
+      const currentProductPrice = getProductPrice(current, product);
+      return {
+        ...current,
+        [productId]: {
+          ...currentProductPrice,
+          componentPrices: {
+            ...currentProductPrice.componentPrices,
+            [componentId]: {
+              ...(currentProductPrice.componentPrices[componentId] ?? emptyComponentMarketPrice()),
+              [key]: value,
+            },
+          },
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
+  };
+
+  const toggleProduct = (id: string) => {
+    setExpandedProductId((current) => current === id ? null : id);
+  };
+
+  const toggleProductWithKeyboard = (event: ReactKeyboardEvent, id: string) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleProduct(id);
   };
 
   const openNewProduct = () => {
@@ -834,7 +878,7 @@ export default function Home() {
                   <th>판매 기준가</th>
                   <th>실수령 메소</th>
                   <th>효율</th>
-                  <th>마일리지</th>
+                  <th>상태</th>
                   <th><span className="visually-hidden">관리</span></th>
                 </tr>
               </thead>
@@ -842,42 +886,73 @@ export default function Home() {
                 {rankedProducts.map((product, index) => {
                   const productPrice = getProductPrice(priceData, product);
                   const base = calculate(product, productPrice, settings);
-                  const mileage = product.mileage30Eligible ? calculate(product, productPrice, settings, true) : null;
                   const isReference = product.category === "reference";
                   const hasPrice = !isReference && base.salePrice > 0;
                   const state = hasPrice ? verdict(base.gapPercent) : { text: isReference ? "참고 전용" : "가격 미입력", className: "neutral" };
                   const includedCount = totalQuantity(product);
                   const excludedCount = excludedQuantity(product);
+                  const isExpanded = expandedProductId === product.id;
+                  const panelId = `product-panel-${product.id}`;
                   return (
-                    <tr key={product.id} className={!product.active ? "muted-row" : ""}>
-                      <td>
-                        <div className="product-cell">
-                          <span className="rank">{hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
-                          <div>
-                            <button className="product-name" type="button" onClick={() => setDetailId(product.id)}>{product.name}</button>
-                            <span className="product-meta">{product.active ? "판매 중" : "판매 종료"}{(includedCount > 1 || excludedCount > 0) ? ` · 합산 ${includedCount}개${excludedCount > 0 ? ` · 제외 ${excludedCount}개` : ""}` : ""}</span>
+                    <Fragment key={product.id}>
+                      <tr
+                        className={`product-summary-row ${isExpanded ? "expanded" : ""} ${!product.active ? "muted-row" : ""}`}
+                        tabIndex={0}
+                        aria-expanded={isExpanded}
+                        aria-controls={panelId}
+                        onClick={() => toggleProduct(product.id)}
+                        onKeyDown={(event) => toggleProductWithKeyboard(event, product.id)}
+                      >
+                        <td>
+                          <div className="product-cell">
+                            <span className="rank">{hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
+                            <div>
+                              <strong className="product-name">{product.name}</strong>
+                              <span className="product-meta">{product.active ? "판매 중" : "판매 종료"}{(includedCount > 1 || excludedCount > 0) ? ` · 구성 ${includedCount + excludedCount}개` : ""}</span>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td><CategoryBadges product={product} /></td>
-                      <td><strong>{isReference ? "—" : formatNumber(product.cashPrice)}</strong><small>{isReference ? "일반 순위 제외" : "캐시"}</small></td>
-                      <td>
-                        <strong>{formatOptionalEok(base.salePrice)}</strong>
-                        {!isReference && <select className="inline-select" value={productPrice.priceBasis} onChange={(event) => updateProductPrice(product.id, { priceBasis: event.target.value as PriceBasis })} aria-label={`${product.name} 판매 가격 기준`}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option><option value="direct">직접 확인가</option></select>}
-                        {!isReference && <small>{formatDate(productPrice.updatedAt)}</small>}
-                      </td>
-                      <td><strong>{formatOptionalEok(base.netMeso)}</strong><small>{isReference ? "—" : `수수료 ${formatNumber(settings.auctionFee, 1)}%`}</small></td>
-                      <td className="efficiency-cell">
-                        <strong>{formatWon(base.primaryPerEok)}</strong>
-                        <span className={`result-chip ${state.className}`}>{state.text}</span>
-                        <small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : isReference ? "효율 계산에 포함하지 않음" : "시세를 입력해 주세요"}</small>
-                      </td>
-                      <td className="mileage-cell">
-                        {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">30% 가능</span> : <span className="no-chip">사용 불가</span>}
-                        {settings.showMileage && mileage && <small>적용 {formatWon(mileage.primaryPerEok)}<br />{formatNumber(mileage.mileageUsed)} 마일 필요</small>}
-                      </td>
-                      <td><div className="row-actions"><button type="button" onClick={() => setDetailId(product.id)}>상세</button>{!isReference && <button type="button" onClick={() => setEditor({ ...product, ...productPrice })}>입력</button>}</div></td>
-                    </tr>
+                        </td>
+                        <td><CategoryBadges product={product} /></td>
+                        <td><strong>{isReference ? "—" : formatNumber(product.cashPrice)}</strong><small>{isReference ? "순위 제외" : "캐시"}</small></td>
+                        <td><strong>{formatOptionalEok(base.salePrice)}</strong><small>{isReference ? "참고 전용" : BASIS_LABEL[productPrice.priceBasis]}</small></td>
+                        <td><strong>{formatOptionalEok(base.netMeso)}</strong><small>{isReference ? "—" : `수수료 ${formatNumber(settings.auctionFee, 1)}%`}</small></td>
+                        <td className="efficiency-cell">
+                          <strong>{formatWon(base.primaryPerEok)}</strong>
+                          <span className={`result-chip ${state.className}`}>{state.text}</span>
+                        </td>
+                        <td className="summary-status-cell">
+                          <span className={`sale-state ${product.active ? "active" : "inactive"}`}>{product.active ? "판매 중" : "판매 종료"}</span>
+                          {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
+                        </td>
+                        <td>
+                          <button
+                            className="accordion-toggle"
+                            type="button"
+                            aria-expanded={isExpanded}
+                            aria-controls={panelId}
+                            aria-label={`${product.name} ${isExpanded ? "접기" : "펼치기"}`}
+                            onClick={(event) => { event.stopPropagation(); toggleProduct(product.id); }}
+                          ><span className="chevron" aria-hidden="true">⌄</span></button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="product-detail-row">
+                          <td colSpan={8}>
+                            <div className="product-accordion-panel" id={panelId}>
+                              <ProductAccordionDetails
+                                product={product}
+                                priceData={productPrice}
+                                settings={settings}
+                                onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
+                                onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
+                                onDetail={() => setDetailId(product.id)}
+                                onEdit={() => setEditor({ ...product, ...productPrice })}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -893,9 +968,12 @@ export default function Home() {
               priceData={getProductPrice(priceData, product)}
               settings={settings}
               rank={index + 1}
+              expanded={expandedProductId === product.id}
+              onToggle={() => toggleProduct(product.id)}
               onDetail={() => setDetailId(product.id)}
               onEdit={() => setEditor({ ...product, ...getProductPrice(priceData, product) })}
               onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
+              onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
             />
           ))}
         </div>
@@ -1063,52 +1141,165 @@ function ProductCard({
   priceData,
   settings,
   rank,
+  expanded,
+  onToggle,
   onDetail,
   onEdit,
   onPriceBasisChange,
+  onComponentPriceChange,
 }: {
   product: CatalogProduct;
   priceData: ProductPriceData;
   settings: Settings;
   rank: number;
+  expanded: boolean;
+  onToggle: () => void;
   onDetail: () => void;
   onEdit: () => void;
   onPriceBasisChange: (basis: PriceBasis) => void;
+  onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
 }) {
   const base = calculate(product, priceData, settings);
-  const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
   const isReference = product.category === "reference";
   const hasPrice = !isReference && base.salePrice > 0;
   const state = hasPrice ? verdict(base.gapPercent) : { text: isReference ? "참고 전용" : "가격 미입력", className: "neutral" };
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
+  const panelId = `product-card-panel-${product.id}`;
 
   return (
-    <article className={`product-card panel ${!product.active ? "muted-card" : ""}`}>
-      <header className="product-card-header">
-        <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
-        <div className="product-card-title">
-          <button type="button" onClick={onDetail}>{product.name}</button>
-          <CategoryBadges product={product} />
-        </div>
+    <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"} ${!product.active ? "muted-card" : ""}`}>
+      <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
+        <span className="card-product-identity">
+          <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
+          <strong>{product.name}</strong>
+        </span>
+        <span className="card-primary-efficiency">
+          <small>1억당 현금</small>
+          <strong>{formatWon(base.primaryPerEok)}</strong>
+          <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
+        </span>
+        <span className="chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div className="product-card-chip-row">
+        <CategoryBadges product={product} />
         <span className={`sale-state ${product.active ? "active" : "inactive"}`}>{product.active ? "판매 중" : "판매 종료"}</span>
-      </header>
-      <div className="product-card-meta">
-        <span>{isReference ? "일반 판매효율 순위 제외" : product.mileage30Eligible ? "마일리지 30% 가능" : "마일리지 사용 불가"}</span>
-        {(includedCount > 1 || excludedCount > 0) && <span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 제외 ${excludedCount}개` : ""}</span>}
+        {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
+        {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
       </div>
-      <dl className="product-card-metrics">
-        <div><dt>캐시 가격</dt><dd>{isReference ? "—" : `${formatNumber(product.cashPrice)}캐시`}</dd></div>
+      <dl className="product-card-summary">
+        <div><dt>캐시</dt><dd>{isReference ? "—" : formatNumber(product.cashPrice)}</dd></div>
         <div><dt>판매 기준가</dt><dd>{formatOptionalEok(base.salePrice)}</dd></div>
         <div><dt>실수령 메소</dt><dd>{formatOptionalEok(base.netMeso)}</dd></div>
-        <div className="card-efficiency"><dt>1억당 현금</dt><dd>{formatWon(base.primaryPerEok)}</dd><small className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</small></div>
       </dl>
-      {settings.showMileage && mileage && <div className="card-mileage-result"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일 필요</small></div>}
-      <div className="product-card-actions">
-        {!isReference && <label><span>가격 기준</span><select value={priceData.priceBasis} onChange={(event) => onPriceBasisChange(event.target.value as PriceBasis)}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option><option value="direct">직접 확인가</option></select></label>}
-        <div><button className="secondary-button" type="button" onClick={onDetail}>상세 보기</button>{!isReference && <button className="primary-button" type="button" onClick={onEdit}>가격 입력</button>}</div>
-      </div>
+      {expanded && (
+        <div className="product-accordion-panel mobile-accordion-panel" id={panelId}>
+          <ProductAccordionDetails
+            product={product}
+            priceData={priceData}
+            settings={settings}
+            onPriceBasisChange={onPriceBasisChange}
+            onComponentPriceChange={onComponentPriceChange}
+            onDetail={onDetail}
+            onEdit={onEdit}
+          />
+        </div>
+      )}
     </article>
+  );
+}
+
+function ProductAccordionDetails({
+  product,
+  priceData,
+  settings,
+  onPriceBasisChange,
+  onComponentPriceChange,
+  onDetail,
+  onEdit,
+}: {
+  product: CatalogProduct;
+  priceData: ProductPriceData;
+  settings: Settings;
+  onPriceBasisChange: (basis: PriceBasis) => void;
+  onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
+  onDetail: () => void;
+  onEdit: () => void;
+}) {
+  const base = calculate(product, priceData, settings);
+  const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
+  const isReference = product.category === "reference";
+  const includedCount = totalQuantity(product);
+  const excludedCount = excludedQuantity(product);
+
+  return (
+    <div className="accordion-detail-content">
+      <div className="accordion-detail-topline">
+        <div>
+          <strong>상품 상세 및 가격 입력</strong>
+          <span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span>
+        </div>
+        {!isReference && (
+          <label className="accordion-basis-select">
+            <span>판매 가격 기준</span>
+            <select value={priceData.priceBasis} onChange={(event) => onPriceBasisChange(event.target.value as PriceBasis)}>
+              <option value="current">현재 최저가</option>
+              <option value="recent">최근 체결가</option>
+              <option value="direct">직접 확인가</option>
+            </select>
+          </label>
+        )}
+      </div>
+
+      {!isReference && (
+        <div className="accordion-result-strip">
+          <div><span>선택 기준 합산가</span><strong>{formatOptionalEok(base.salePrice)}</strong></div>
+          <div><span>실수령 메소</span><strong>{formatOptionalEok(base.netMeso)}</strong></div>
+          {settings.showMileage && mileage && <div className="mileage-summary"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일 필요</small></div>}
+          <div><span>마지막 가격 확인</span><strong>{formatDate(priceData.updatedAt)}</strong></div>
+        </div>
+      )}
+
+      {isReference ? (
+        <div className="reference-detail-note compact"><strong>마일리지 참고 품목</strong><p>일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
+      ) : (
+        <section className="accordion-price-editor" aria-label={`${product.name} 구성품별 가격 입력`}>
+          <div className="accordion-price-heading">
+            <div><strong>구성품별 경매장 가격</strong><small>억 메소 단위로 입력하면 즉시 합산되고 이 기기에 자동 저장됩니다.</small></div>
+            <span>선택 기준 · {BASIS_LABEL[priceData.priceBasis]}</span>
+          </div>
+          <div className="accordion-component-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span><span>직접 확인가</span></div>
+          {product.components.map((component) => {
+            const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
+            const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
+            return (
+              <div className="accordion-component-row" key={component.id}>
+                <div className="accordion-component-name">
+                  <strong>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</strong>
+                  <small>선택 기준 {formatOptionalEok(selectedComponentPrice)}</small>
+                </div>
+                <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                <label><span>직접 확인가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.manuallyConfirmedPrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "manuallyConfirmedPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+              </div>
+            );
+          })}
+          {excludedCount > 0 && <div className="excluded-components"><strong>계산 제외 구성품</strong><span>{product.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
+        </section>
+      )}
+
+      <div className="accordion-meta-actions">
+        <div className="accordion-meta">
+          <span>판매 스냅샷 {product.checkedAt}</span>
+          {!isReference && <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>}
+          {priceData.note && <span>메모 · {priceData.note}</span>}
+        </div>
+        <div className="accordion-actions">
+          <button className="secondary-button" type="button" onClick={onDetail}>상세 계산 보기</button>
+          {!isReference && <button className="primary-button" type="button" onClick={onEdit}>상품·가격 전체 편집</button>}
+        </div>
+      </div>
+    </div>
   );
 }
 
