@@ -4,11 +4,51 @@ export type ProductComponent = {
   quantity: number;
 };
 
+export type ProductCategory =
+  | "basic"
+  | "random"
+  | "bundle"
+  | "coupon"
+  | "job"
+  | "boss"
+  | "reference";
+
+export type ProductSubcategory =
+  | "utility"
+  | "scroll"
+  | "ring"
+  | "color"
+  | "royal"
+  | "crystal"
+  | "wonderberry"
+  | "gift"
+  | "multiPack"
+  | "hair"
+  | "face"
+  | "mixDye"
+  | "mixLens"
+  | "genderChange"
+  | "allJob"
+  | "boss"
+  | "best"
+  | "adventurer"
+  | "cygnus"
+  | "heroes"
+  | "resistance"
+  | "demon"
+  | "nova"
+  | "flora"
+  | "anima"
+  | "transcendent"
+  | "friendsWorld"
+  | "bossSet"
+  | "mileageReference";
+
 export type CatalogProduct = {
   id: string;
   name: string;
-  category: "기본" | "확률형" | "번들" | "쿠폰" | "직업 코디" | "보스 코디" | "사용자 추가";
-  subcategory?: string;
+  category: ProductCategory;
+  subcategory?: ProductSubcategory;
   cashPrice: number;
   mileage30Eligible: boolean;
   active: boolean;
@@ -17,17 +57,61 @@ export type CatalogProduct = {
   checkedAt: string;
 };
 
-export type MileageReference = {
-  id: string;
-  name: string;
-  category: "마일리지 참고";
-  active: true;
-  checkedAt: string;
+export const CATEGORY_LABELS: Record<ProductCategory, string> = {
+  basic: "기본",
+  random: "확률형",
+  bundle: "묶음/번들",
+  coupon: "쿠폰",
+  job: "직업 코디",
+  boss: "보스 코디",
+  reference: "마일리지 참고",
+};
+
+export const SUBCATEGORY_LABELS: Record<ProductSubcategory, string> = {
+  utility: "편의",
+  scroll: "스크롤",
+  ring: "반지",
+  color: "컬러",
+  royal: "로얄",
+  crystal: "크리스탈",
+  wonderberry: "원더베리",
+  gift: "기프트",
+  multiPack: "다중 묶음",
+  hair: "헤어",
+  face: "성형",
+  mixDye: "믹스염색",
+  mixLens: "믹스렌즈",
+  genderChange: "성별 변경",
+  allJob: "전 직업",
+  boss: "보스",
+  best: "BEST",
+  adventurer: "모험가",
+  cygnus: "시그너스",
+  heroes: "영웅",
+  resistance: "레지스탕스",
+  demon: "데몬",
+  nova: "노바",
+  flora: "레프",
+  anima: "아니마",
+  transcendent: "초월자",
+  friendsWorld: "프렌즈 월드",
+  bossSet: "보스 세트",
+  mileageReference: "마일리지 참고",
+};
+
+export const SUBCATEGORY_OPTIONS: Record<ProductCategory, ProductSubcategory[]> = {
+  basic: ["utility", "scroll", "ring", "color"],
+  random: ["royal", "crystal", "wonderberry"],
+  bundle: ["gift", "multiPack"],
+  coupon: ["hair", "face", "mixDye", "mixLens", "genderChange", "allJob", "boss", "best"],
+  job: ["adventurer", "cygnus", "heroes", "resistance", "demon", "nova", "flora", "anima", "transcendent", "friendsWorld"],
+  boss: ["bossSet"],
+  reference: ["mileageReference"],
 };
 
 type ComponentInput = string | readonly [name: string, quantity: number];
 type ProductOptions = {
-  subcategory?: string;
+  subcategory?: ProductSubcategory;
   mileage30Eligible?: boolean;
   components?: readonly ComponentInput[];
   excludedComponents?: readonly ComponentInput[];
@@ -64,15 +148,30 @@ function product(
   };
 }
 
+const JOB_SUBCATEGORY_BY_LABEL = {
+  "모험가": "adventurer",
+  "시그너스": "cygnus",
+  "영웅": "heroes",
+  "레지스탕스": "resistance",
+  "데몬": "demon",
+  "노바": "nova",
+  "레프": "flora",
+  "아니마": "anima",
+  "초월자": "transcendent",
+  "프렌즈 월드": "friendsWorld",
+} as const satisfies Record<string, ProductSubcategory>;
+
+type JobSubcategoryLabel = keyof typeof JOB_SUBCATEGORY_BY_LABEL;
+
 function job(
   id: string,
   name: string,
-  subcategory: string,
+  subcategory: JobSubcategoryLabel,
   cashPrice: number,
   components: readonly ComponentInput[],
   excludedComponents: readonly ComponentInput[] = [],
 ) {
-  return product(id, name, "직업 코디", cashPrice, { subcategory, components, excludedComponents });
+  return product(id, name, "job", cashPrice, { subcategory: JOB_SUBCATEGORY_BY_LABEL[subcategory], components, excludedComponents });
 }
 
 function boss(
@@ -82,38 +181,38 @@ function boss(
   components: readonly ComponentInput[],
   excludedComponents: readonly ComponentInput[] = [],
 ) {
-  return product(id, name, "보스 코디", cashPrice, { subcategory: "보스", components, excludedComponents });
+  return product(id, name, "boss", cashPrice, { subcategory: "bossSet", components, excludedComponents });
 }
 
 const BASIC_AND_RANDOM_PRODUCTS: CatalogProduct[] = [
-  product("basic-01", "플래티넘 카르마의 가위", "기본", 5900, { mileage30Eligible: true }),
-  product("basic-02", "혈맹의 반지", "기본", 5900),
-  product("basic-03", "마네킹", "기본", 18900),
-  product("basic-04", "추가옵션 전승 스크롤", "기본", 49000),
-  product("basic-05", "잠재능력 전승스크롤", "기본", 99000),
-  product("basic-06", "컬러링 프리즘", "기본", 5900, { mileage30Eligible: true }),
-  product("random-01", "메이플 로얄 스타일", "확률형", 2200),
-  product("random-02", "루나 크리스탈", "확률형", 3900),
-  product("random-03", "스페셜 루나 크리스탈", "확률형", 3900),
-  product("random-04", "위습의 원더베리", "확률형", 5400),
-  product("random-05", "위습의 원더베리 11개", "확률형", 54000, { components: [["위습의 원더베리", 11]] }),
-  product("bundle-01", "뷰티크 기프트", "번들", 3300),
-  product("bundle-02", "뷰티크 기프트 10개", "번들", 33000, { components: [["뷰티크 기프트", 10]] }),
+  product("basic-01", "플래티넘 카르마의 가위", "basic", 5900, { subcategory: "utility", mileage30Eligible: true }),
+  product("basic-02", "혈맹의 반지", "basic", 5900, { subcategory: "ring" }),
+  product("basic-03", "마네킹", "basic", 18900, { subcategory: "utility" }),
+  product("basic-04", "추가옵션 전승 스크롤", "basic", 49000, { subcategory: "scroll" }),
+  product("basic-05", "잠재능력 전승스크롤", "basic", 99000, { subcategory: "scroll" }),
+  product("basic-06", "컬러링 프리즘", "basic", 5900, { subcategory: "color", mileage30Eligible: true }),
+  product("random-01", "메이플 로얄 스타일", "random", 2200, { subcategory: "royal" }),
+  product("random-02", "루나 크리스탈", "random", 3900, { subcategory: "crystal" }),
+  product("random-03", "스페셜 루나 크리스탈", "random", 3900, { subcategory: "crystal" }),
+  product("random-04", "위습의 원더베리", "random", 5400, { subcategory: "wonderberry" }),
+  product("random-05", "위습의 원더베리 11개", "random", 54000, { subcategory: "wonderberry", components: [["위습의 원더베리", 11]] }),
+  product("bundle-01", "뷰티크 기프트", "bundle", 3300, { subcategory: "gift" }),
+  product("bundle-02", "뷰티크 기프트 10개", "bundle", 33000, { subcategory: "multiPack", components: [["뷰티크 기프트", 10]] }),
 ];
 
 const COUPON_PRODUCTS: CatalogProduct[] = [
-  product("coupon-01", "프리미엄 헤어쿠폰", "쿠폰", 5500, { mileage30Eligible: true }),
-  product("coupon-02", "프리미엄 성형쿠폰", "쿠폰", 3500, { mileage30Eligible: true }),
-  product("coupon-03", "상반기 BEST 프리미엄 헤어 쿠폰", "쿠폰", 5500, { mileage30Eligible: true }),
-  product("coupon-04", "상반기 BEST 프리미엄 성형 쿠폰", "쿠폰", 3500, { mileage30Eligible: true }),
-  product("coupon-05", "보스 헤어 쿠폰", "쿠폰", 5500),
-  product("coupon-06", "보스 성형 쿠폰", "쿠폰", 3500),
-  product("coupon-07", "전 직업 헤어 쿠폰", "쿠폰", 3500),
-  product("coupon-08", "전 직업 성형 쿠폰", "쿠폰", 2500),
-  product("coupon-09", "전 직업 일러스트 컬렉션 헤어 쿠폰", "쿠폰", 5500),
-  product("coupon-10", "성별 변경 쿠폰", "쿠폰", 15000),
-  product("coupon-11", "커스텀 믹스 컬러렌즈 쿠폰", "쿠폰", 24000),
-  product("coupon-12", "커스텀 믹스염색 쿠폰", "쿠폰", 48000),
+  product("coupon-01", "프리미엄 헤어쿠폰", "coupon", 5500, { subcategory: "hair", mileage30Eligible: true }),
+  product("coupon-02", "프리미엄 성형쿠폰", "coupon", 3500, { subcategory: "face", mileage30Eligible: true }),
+  product("coupon-03", "상반기 BEST 프리미엄 헤어 쿠폰", "coupon", 5500, { subcategory: "best", mileage30Eligible: true }),
+  product("coupon-04", "상반기 BEST 프리미엄 성형 쿠폰", "coupon", 3500, { subcategory: "best", mileage30Eligible: true }),
+  product("coupon-05", "보스 헤어 쿠폰", "coupon", 5500, { subcategory: "boss" }),
+  product("coupon-06", "보스 성형 쿠폰", "coupon", 3500, { subcategory: "boss" }),
+  product("coupon-07", "전 직업 헤어 쿠폰", "coupon", 3500, { subcategory: "allJob" }),
+  product("coupon-08", "전 직업 성형 쿠폰", "coupon", 2500, { subcategory: "allJob" }),
+  product("coupon-09", "전 직업 일러스트 컬렉션 헤어 쿠폰", "coupon", 5500, { subcategory: "allJob" }),
+  product("coupon-10", "성별 변경 쿠폰", "coupon", 15000, { subcategory: "genderChange" }),
+  product("coupon-11", "커스텀 믹스 컬러렌즈 쿠폰", "coupon", 24000, { subcategory: "mixLens" }),
+  product("coupon-12", "커스텀 믹스염색 쿠폰", "coupon", 48000, { subcategory: "mixDye" }),
 ];
 
 const DEMON_PRODUCTS: CatalogProduct[] = [
@@ -267,12 +366,14 @@ export const CURRENT_PRODUCTS: CatalogProduct[] = [
   ...BOSS_PRODUCTS,
 ];
 
-export const MILEAGE_REFERENCES: MileageReference[] = [
-  { id: "mileage-reference-01", name: "붕어빵 뿌리기 11개", category: "마일리지 참고", active: true, checkedAt: CHECKED_AT },
-  { id: "mileage-reference-02", name: "달콤한 붕어빵 11개", category: "마일리지 참고", active: true, checkedAt: CHECKED_AT },
-  { id: "mileage-reference-03", name: "슈퍼파워버프", category: "마일리지 참고", active: true, checkedAt: CHECKED_AT },
-  { id: "mileage-reference-04", name: "마슈르의 선물기상효과", category: "마일리지 참고", active: true, checkedAt: CHECKED_AT },
+export const MILEAGE_REFERENCES: CatalogProduct[] = [
+  product("mileage-reference-01", "붕어빵 뿌리기 11개", "reference", 0, { subcategory: "mileageReference" }),
+  product("mileage-reference-02", "달콤한 붕어빵 11개", "reference", 0, { subcategory: "mileageReference" }),
+  product("mileage-reference-03", "슈퍼파워버프", "reference", 0, { subcategory: "mileageReference" }),
+  product("mileage-reference-04", "마슈르의 선물기상효과", "reference", 0, { subcategory: "mileageReference" }),
 ];
+
+export const ALL_CATALOG_PRODUCTS: CatalogProduct[] = [...CURRENT_PRODUCTS, ...MILEAGE_REFERENCES];
 
 export const INITIAL_DATA_COUNTS = {
   currentProducts: CURRENT_PRODUCTS.length,
@@ -284,24 +385,24 @@ export const INITIAL_DATA_COUNTS = {
 };
 
 function validateInitialCatalog() {
-  const expectedJobs: Record<string, number> = {
-    "모험가": 24,
-    "시그너스": 11,
-    "영웅": 12,
-    "레지스탕스": 10,
-    "데몬": 4,
-    "노바": 4,
-    "레프": 5,
-    "아니마": 6,
-    "초월자": 2,
-    "프렌즈 월드": 2,
-  };
+  const expectedJobs = {
+    adventurer: 24,
+    cygnus: 11,
+    heroes: 12,
+    resistance: 10,
+    demon: 4,
+    nova: 4,
+    flora: 5,
+    anima: 6,
+    transcendent: 2,
+    friendsWorld: 2,
+  } as const;
   const actualJobs = Object.fromEntries(
     Object.keys(expectedJobs).map((key) => [key, JOB_PRODUCTS.filter((item) => item.subcategory === key).length]),
   );
   const differences = Object.entries(expectedJobs)
     .filter(([key, count]) => actualJobs[key] !== count)
-    .map(([key, count]) => `${key}: ${actualJobs[key] ?? 0}/${count}`);
+    .map(([key, count]) => `${SUBCATEGORY_LABELS[key as keyof typeof expectedJobs]}: ${actualJobs[key] ?? 0}/${count}`);
   if (differences.length) throw new Error(`직업 코디 수량 불일치: ${differences.join(", ")}`);
   if (INITIAL_DATA_COUNTS.jobProducts !== 80) throw new Error(`직업 코디 합계 불일치: ${INITIAL_DATA_COUNTS.jobProducts}/80`);
   if (INITIAL_DATA_COUNTS.bossProducts !== 22) throw new Error(`보스 코디 합계 불일치: ${INITIAL_DATA_COUNTS.bossProducts}/22`);
@@ -312,8 +413,8 @@ function validateInitialCatalog() {
   if (CURRENT_PRODUCTS.filter((item) => item.mileage30Eligible).length !== 6) throw new Error("마일리지 30% 가능 상품은 6개여야 합니다.");
   if (CURRENT_PRODUCTS.some((item) => !item.active || item.checkedAt !== CHECKED_AT)) throw new Error("초기 상품의 판매 상태 또는 확인일이 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.some((item) => item.name === "블레어 살롱 헤어 쿠폰")) throw new Error("판매 종료 상품이 현재 판매 목록에 포함되었습니다.");
-  const ids = new Set(CURRENT_PRODUCTS.map((item) => item.id));
-  if (ids.size !== CURRENT_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");
+  const ids = new Set(ALL_CATALOG_PRODUCTS.map((item) => item.id));
+  if (ids.size !== ALL_CATALOG_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");
 }
 
 validateInitialCatalog();
