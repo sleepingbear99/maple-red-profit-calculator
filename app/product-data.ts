@@ -44,6 +44,16 @@ export type ProductSubcategory =
   | "bossSet"
   | "mileageReference";
 
+export type ProductStatus =
+  | "active"
+  | "ended"
+  | "upcoming"
+  | "paused"
+  | "unavailable"
+  | "unknown";
+
+export type ProductStatusSource = "manual" | "automatic";
+
 export type CatalogProduct = {
   id: string;
   name: string;
@@ -51,7 +61,10 @@ export type CatalogProduct = {
   subcategory?: ProductSubcategory;
   cashPrice: number;
   mileage30Eligible: boolean;
-  active: boolean;
+  status: ProductStatus;
+  saleStartAt?: string;
+  saleEndAt?: string;
+  statusSource: ProductStatusSource;
   components: ProductComponent[];
   excludedComponents: ProductComponent[];
   checkedAt: string;
@@ -141,7 +154,8 @@ function product(
     subcategory: options.subcategory,
     cashPrice,
     mileage30Eligible: options.mileage30Eligible ?? false,
-    active: true,
+    status: "active",
+    statusSource: "manual",
     components: normalizeComponents(id, options.components ?? [name]),
     excludedComponents: normalizeComponents(`${id}-excluded`, options.excludedComponents ?? []),
     checkedAt: CHECKED_AT,
@@ -411,7 +425,7 @@ function validateInitialCatalog() {
   if (INITIAL_DATA_COUNTS.currentProducts !== 127) throw new Error(`현재 판매 상품 합계 불일치: ${INITIAL_DATA_COUNTS.currentProducts}/127`);
   if (INITIAL_DATA_COUNTS.mileageReferences !== 4) throw new Error(`마일리지 참고 합계 불일치: ${INITIAL_DATA_COUNTS.mileageReferences}/4`);
   if (CURRENT_PRODUCTS.filter((item) => item.mileage30Eligible).length !== 6) throw new Error("마일리지 30% 가능 상품은 6개여야 합니다.");
-  if (CURRENT_PRODUCTS.some((item) => !item.active || item.checkedAt !== CHECKED_AT)) throw new Error("초기 상품의 판매 상태 또는 확인일이 올바르지 않습니다.");
+  if (CURRENT_PRODUCTS.some((item) => item.status !== "active" || item.checkedAt !== CHECKED_AT)) throw new Error("초기 상품의 판매 상태 또는 확인일이 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.some((item) => item.name === "블레어 살롱 헤어 쿠폰")) throw new Error("판매 종료 상품이 현재 판매 목록에 포함되었습니다.");
   const ids = new Set(ALL_CATALOG_PRODUCTS.map((item) => item.id));
   if (ids.size !== ALL_CATALOG_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");

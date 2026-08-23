@@ -9,6 +9,8 @@ import {
   SUBCATEGORY_OPTIONS,
   type CatalogProduct,
   type ProductCategory,
+  type ProductStatus,
+  type ProductStatusSource,
   type ProductSubcategory,
 } from "./product-data";
 
@@ -54,7 +56,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -69,33 +71,86 @@ const DEFAULT_SETTINGS: Settings = {
 
 const DEFAULT_PRODUCTS = ALL_CATALOG_PRODUCTS;
 
-function migrateCatalogProducts(version: unknown, savedProducts: unknown): CatalogProduct[] {
-  if (version === STORAGE_VERSION && Array.isArray(savedProducts)) return savedProducts as CatalogProduct[];
+const PRODUCT_STATUS_OPTIONS: [ProductStatus, string][] = [
+  ["active", "판매 중"],
+  ["ended", "판매 종료"],
+  ["upcoming", "판매 예정"],
+  ["paused", "일시 판매 중지"],
+  ["unavailable", "구매 불가"],
+  ["unknown", "확인 필요"],
+];
+
+const PRODUCT_STATUS_LABELS = Object.fromEntries(PRODUCT_STATUS_OPTIONS) as Record<ProductStatus, string>;
+const PRODUCT_STATUS_VALUES = PRODUCT_STATUS_OPTIONS.map(([value]) => value);
+const PRODUCT_STATUS_SOURCE_VALUES: ProductStatusSource[] = ["manual", "automatic"];
+
+type SavedProductRecord = Partial<CatalogProduct> & { active?: unknown };
+
+function isProductStatus(value: unknown): value is ProductStatus {
+  return typeof value === "string" && PRODUCT_STATUS_VALUES.includes(value as ProductStatus);
+}
+
+function isProductStatusSource(value: unknown): value is ProductStatusSource {
+  return typeof value === "string" && PRODUCT_STATUS_SOURCE_VALUES.includes(value as ProductStatusSource);
+}
+
+function isProductCategory(value: unknown): value is ProductCategory {
+  return typeof value === "string" && value in CATEGORY_LABELS;
+}
+
+function isProductSubcategory(value: unknown): value is ProductSubcategory {
+  return typeof value === "string" && value in SUBCATEGORY_LABELS;
+}
+
+function normalizeSaleDate(value: unknown) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+}
+
+function savedStatus(item: SavedProductRecord): ProductStatus {
+  if (isProductStatus(item.status)) return item.status;
+  return item.active === false ? "ended" : "active";
+}
+
+function mergeSavedProduct(item: SavedProductRecord, fallback?: CatalogProduct): CatalogProduct | null {
+  if (
+    typeof item.id !== "string" || typeof item.name !== "string" ||
+    typeof item.cashPrice !== "number" || typeof item.mileage30Eligible !== "boolean" ||
+    !Array.isArray(item.components) || !Array.isArray(item.excludedComponents) ||
+    typeof item.checkedAt !== "string"
+  ) return null;
+
+  return {
+    ...(fallback ?? {}),
+    id: item.id,
+    name: item.name,
+    category: isProductCategory(item.category) ? item.category : fallback?.category ?? "basic",
+    subcategory: isProductSubcategory(item.subcategory) ? item.subcategory : fallback?.subcategory ?? "utility",
+    cashPrice: item.cashPrice,
+    mileage30Eligible: item.mileage30Eligible,
+    status: savedStatus(item),
+    saleStartAt: normalizeSaleDate(item.saleStartAt),
+    saleEndAt: normalizeSaleDate(item.saleEndAt),
+    statusSource: isProductStatusSource(item.statusSource) ? item.statusSource : "manual",
+    components: item.components,
+    excludedComponents: item.excludedComponents,
+    checkedAt: item.checkedAt,
+  };
+}
+
+function migrateCatalogProducts(_version: unknown, savedProducts: unknown): CatalogProduct[] {
   if (!Array.isArray(savedProducts)) return DEFAULT_PRODUCTS;
-  const customProducts: CatalogProduct[] = [];
-  for (const value of savedProducts) {
-    if (!value || typeof value !== "object") continue;
-    const item = value as Partial<CatalogProduct>;
-    if (
-      typeof item.id !== "string" || !item.id.startsWith("user-") ||
-      typeof item.name !== "string" || typeof item.cashPrice !== "number" ||
-      typeof item.mileage30Eligible !== "boolean" || typeof item.active !== "boolean" ||
-      !Array.isArray(item.components) || !Array.isArray(item.excludedComponents) || typeof item.checkedAt !== "string"
-    ) continue;
-    customProducts.push({
-      id: item.id,
-      name: item.name,
-      category: "basic",
-      subcategory: "utility",
-      cashPrice: item.cashPrice,
-      mileage30Eligible: item.mileage30Eligible,
-      active: item.active,
-      components: item.components,
-      excludedComponents: item.excludedComponents,
-      checkedAt: item.checkedAt,
-    });
-  }
-  return [...DEFAULT_PRODUCTS, ...customProducts];
+  const savedRecords = savedProducts.filter((value): value is SavedProductRecord => !!value && typeof value === "object");
+  const savedById = new Map(savedRecords.filter((item) => typeof item.id === "string").map((item) => [item.id as string, item]));
+  const defaultIds = new Set(DEFAULT_PRODUCTS.map((product) => product.id));
+  const builtInProducts = DEFAULT_PRODUCTS.map((fallback) => {
+    const saved = savedById.get(fallback.id);
+    return saved ? mergeSavedProduct(saved, fallback) ?? fallback : fallback;
+  });
+  const customProducts = savedRecords
+    .filter((item) => typeof item.id === "string" && item.id.startsWith("user-") && !defaultIds.has(item.id))
+    .map((item) => mergeSavedProduct(item))
+    .filter((item): item is CatalogProduct => item !== null);
+  return [...builtInProducts, ...customProducts];
 }
 
 const BASIS_LABEL: Record<PriceBasis, string> = {
@@ -114,6 +169,26 @@ const CATEGORY_FILTER_OPTIONS: [CategoryFilter, string][] = [
   ["boss", "보스 코디"],
   ["reference", "마일리지 참고"],
 ];
+
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function effectiveProductStatus(product: CatalogProduct): ProductStatus {
+  if (product.statusSource !== "automatic") return product.status;
+  const today = localDateKey();
+  if (product.saleStartAt && today < product.saleStartAt) return "upcoming";
+  if (product.saleEndAt && today > product.saleEndAt) return "ended";
+  if (product.saleStartAt || product.saleEndAt) return "active";
+  return product.status;
+}
+
+function isProductActive(product: CatalogProduct) {
+  return effectiveProductStatus(product) === "active";
+}
 
 function safeNumber(value: string) {
   const parsed = Number(value);
@@ -358,6 +433,12 @@ function CategoryBadges({ product }: { product: CatalogProduct }) {
   );
 }
 
+function ProductStatusBadge({ product, showActive = false }: { product: CatalogProduct; showActive?: boolean }) {
+  const status = effectiveProductStatus(product);
+  if (status === "active" && !showActive) return null;
+  return <span className={`sale-state status-${status}`}>{PRODUCT_STATUS_LABELS[status]}</span>;
+}
+
 export default function Home() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [products, setProducts] = useState<CatalogProduct[]>(DEFAULT_PRODUCTS);
@@ -447,7 +528,7 @@ export default function Home() {
         if (subcategoryFilter !== "all" && product.subcategory !== subcategoryFilter) return false;
         if (mileageFilter === "eligible" && !product.mileage30Eligible) return false;
         if (mileageFilter === "ineligible" && product.mileage30Eligible) return false;
-        if (activeOnly && !product.active) return false;
+        if (activeOnly && !isProductActive(product)) return false;
         if (profitFilter === "good" && !(base.salePrice > 0 && base.gapPercent > 2)) return false;
         if (profitFilter === "bad" && !(base.salePrice > 0 && base.gapPercent < -2)) return false;
         return true;
@@ -477,7 +558,7 @@ export default function Home() {
 
   const bestProduct = useMemo(() => {
     return products
-      .filter((product) => product.category !== "reference" && product.active && selectedPrice(product, getProductPrice(priceData, product)) > 0)
+      .filter((product) => product.category !== "reference" && isProductActive(product) && selectedPrice(product, getProductPrice(priceData, product)) > 0)
       .sort((a, b) => calculate(a, getProductPrice(priceData, a), settings).primaryPerEok - calculate(b, getProductPrice(priceData, b), settings).primaryPerEok)[0];
   }, [products, priceData, settings]);
 
@@ -573,7 +654,8 @@ export default function Home() {
       subcategory: "utility",
       cashPrice: 0,
       mileage30Eligible: false,
-      active: true,
+      status: "active",
+      statusSource: "manual",
       components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
       excludedComponents: [],
       checkedAt: new Date().toISOString().slice(0, 10),
@@ -584,7 +666,8 @@ export default function Home() {
         subcategory: "utility",
         cashPrice: 0,
         mileage30Eligible: false,
-        active: true,
+        status: "active",
+        statusSource: "manual",
         components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
         excludedComponents: [],
         checkedAt: new Date().toISOString().slice(0, 10),
@@ -635,16 +718,8 @@ export default function Home() {
     setEditor(null);
   };
 
-  const deactivateProduct = (product: CatalogProduct) => {
-    if (!window.confirm(`‘${product.name}’ 상품을 판매 종료로 표시할까요? 저장된 시세는 유지됩니다.`)) return;
-    updateProduct(product.id, { active: false });
-    setDetailId(null);
-    setEditor(null);
-    setNotice("판매 종료로 표시했어요. 저장된 시세는 유지됩니다.");
-  };
-
   const addPlanItem = () => {
-    const product = products.find((candidate) => candidate.active && candidate.category !== "reference");
+    const product = products.find((candidate) => isProductActive(candidate) && candidate.category !== "reference");
     if (!product) {
       setNotice("먼저 상품을 추가해 주세요.");
       return;
@@ -896,7 +971,7 @@ export default function Home() {
                   return (
                     <Fragment key={product.id}>
                       <tr
-                        className={`product-summary-row ${isExpanded ? "expanded" : ""} ${!product.active ? "muted-row" : ""}`}
+                        className={`product-summary-row ${isExpanded ? "expanded" : ""}`}
                         tabIndex={0}
                         aria-expanded={isExpanded}
                         aria-controls={panelId}
@@ -907,8 +982,8 @@ export default function Home() {
                           <div className="product-cell">
                             <span className="rank">{hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
                             <div>
-                              <strong className="product-name">{product.name}</strong>
-                              <span className="product-meta">{product.active ? "판매 중" : "판매 종료"}{(includedCount > 1 || excludedCount > 0) ? ` · 구성 ${includedCount + excludedCount}개` : ""}</span>
+                              <span className="product-name-line"><strong className="product-name">{product.name}</strong><ProductStatusBadge product={product} /></span>
+                              {(includedCount > 1 || excludedCount > 0) && <span className="product-meta">구성 {includedCount + excludedCount}개</span>}
                             </div>
                           </div>
                         </td>
@@ -921,7 +996,6 @@ export default function Home() {
                           <span className={`result-chip ${state.className}`}>{state.text}</span>
                         </td>
                         <td className="summary-status-cell">
-                          <span className={`sale-state ${product.active ? "active" : "inactive"}`}>{product.active ? "판매 중" : "판매 종료"}</span>
                           {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
                         </td>
                         <td>
@@ -945,6 +1019,7 @@ export default function Home() {
                                 settings={settings}
                                 onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
                                 onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
+                                onProductChange={(changes) => updateProduct(product.id, changes)}
                                 onDetail={() => setDetailId(product.id)}
                                 onEdit={() => setEditor({ ...product, ...productPrice })}
                               />
@@ -974,6 +1049,7 @@ export default function Home() {
               onEdit={() => setEditor({ ...product, ...getProductPrice(priceData, product) })}
               onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
               onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
+              onProductChange={(changes) => updateProduct(product.id, changes)}
             />
           ))}
         </div>
@@ -1019,7 +1095,7 @@ export default function Home() {
                     <label>
                       <span className="visually-hidden">상품 선택</span>
                       <select value={item.productId} onChange={(event) => updatePlanItem(item.id, { productId: event.target.value, useMileage: false })}>
-                        {products.filter((candidate) => candidate.active && candidate.category !== "reference").map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
+                        {products.filter((candidate) => isProductActive(candidate) && candidate.category !== "reference").map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
                       </select>
                       {product && <small>{formatNumber(product.cashPrice)}캐시 · {productPrice?.saleLimit ? `한도 ${formatNumber(productPrice.saleLimit)}개` : "한도 미설정"}</small>}
                     </label>
@@ -1100,7 +1176,10 @@ export default function Home() {
               <label><span>예상 판매 가능 수량</span><span className="affix-input"><input type="number" min="0" value={editor.saleLimit ?? ""} placeholder="미설정" onChange={(event) => setEditor({ ...editor, saleLimit: optionalNumber(event.target.value) })} /><small>개</small></span></label>
               <label><span>마지막 가격 확인</span><input type="datetime-local" value={editor.updatedAt.slice(0, 16)} onChange={(event) => setEditor({ ...editor, updatedAt: event.target.value })} /></label>
               <label className="editor-check"><input type="checkbox" checked={editor.mileage30Eligible} onChange={(event) => setEditor({ ...editor, mileage30Eligible: event.target.checked })} /><span><b>마일리지 30% 사용 가능</b><small>미적용·적용 효율을 함께 계산합니다.</small></span></label>
-              <label className="editor-check"><input type="checkbox" checked={editor.active} onChange={(event) => setEditor({ ...editor, active: event.target.checked })} /><span><b>현재 판매 중</b><small>끄면 시세를 보존한 채 판매 종료로 표시합니다.</small></span></label>
+              <label><span>판매 상태</span><select value={editor.status} onChange={(event) => setEditor({ ...editor, status: event.target.value as ProductStatus, statusSource: "manual" })}>{PRODUCT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label><span>상태 적용 방식</span><select value={editor.statusSource} onChange={(event) => setEditor({ ...editor, statusSource: event.target.value as ProductStatusSource })}><option value="manual">직접 지정</option><option value="automatic">판매 기간으로 자동</option></select></label>
+              <label><span>판매 시작일</span><input type="date" value={editor.saleStartAt ?? ""} onChange={(event) => setEditor({ ...editor, saleStartAt: event.target.value || undefined })} /></label>
+              <label><span>판매 종료일</span><input type="date" value={editor.saleEndAt ?? ""} onChange={(event) => setEditor({ ...editor, saleEndAt: event.target.value || undefined })} /></label>
               <section className="component-price-editor full">
                 <div className="component-editor-heading">
                   <div><strong>판매가 합산 구성품</strong><small>구성품별 경매장 가격을 억 메소 단위로 입력합니다.</small></div>
@@ -1123,7 +1202,6 @@ export default function Home() {
               <label className="full"><span>메모</span><textarea value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} placeholder="판매 속도, 시세 특이사항 등을 기록하세요." /></label>
             </div>
             <div className="modal-actions">
-              {!editor.isNew && editor.active && <button className="danger-button" type="button" onClick={() => deactivateProduct(editor)}>판매 종료 처리</button>}
               <button className="secondary-button" type="button" onClick={() => setEditor(null)}>취소</button>
               <button className="primary-button" type="button" onClick={saveProduct}>저장하기</button>
             </div>
@@ -1147,6 +1225,7 @@ function ProductCard({
   onEdit,
   onPriceBasisChange,
   onComponentPriceChange,
+  onProductChange,
 }: {
   product: CatalogProduct;
   priceData: ProductPriceData;
@@ -1158,6 +1237,7 @@ function ProductCard({
   onEdit: () => void;
   onPriceBasisChange: (basis: PriceBasis) => void;
   onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
+  onProductChange: (changes: Partial<CatalogProduct>) => void;
 }) {
   const base = calculate(product, priceData, settings);
   const isReference = product.category === "reference";
@@ -1168,11 +1248,11 @@ function ProductCard({
   const panelId = `product-card-panel-${product.id}`;
 
   return (
-    <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"} ${!product.active ? "muted-card" : ""}`}>
+    <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"}`}>
       <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
         <span className="card-product-identity">
           <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
-          <strong>{product.name}</strong>
+          <span className="card-product-name"><strong>{product.name}</strong><ProductStatusBadge product={product} /></span>
         </span>
         <span className="card-primary-efficiency">
           <small>1억당 현금</small>
@@ -1183,7 +1263,6 @@ function ProductCard({
       </button>
       <div className="product-card-chip-row">
         <CategoryBadges product={product} />
-        <span className={`sale-state ${product.active ? "active" : "inactive"}`}>{product.active ? "판매 중" : "판매 종료"}</span>
         {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
         {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
       </div>
@@ -1200,6 +1279,7 @@ function ProductCard({
             settings={settings}
             onPriceBasisChange={onPriceBasisChange}
             onComponentPriceChange={onComponentPriceChange}
+            onProductChange={onProductChange}
             onDetail={onDetail}
             onEdit={onEdit}
           />
@@ -1215,6 +1295,7 @@ function ProductAccordionDetails({
   settings,
   onPriceBasisChange,
   onComponentPriceChange,
+  onProductChange,
   onDetail,
   onEdit,
 }: {
@@ -1223,6 +1304,7 @@ function ProductAccordionDetails({
   settings: Settings;
   onPriceBasisChange: (basis: PriceBasis) => void;
   onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
+  onProductChange: (changes: Partial<CatalogProduct>) => void;
   onDetail: () => void;
   onEdit: () => void;
 }) {
@@ -1250,6 +1332,37 @@ function ProductAccordionDetails({
           </label>
         )}
       </div>
+
+      <section className="accordion-sale-editor" aria-label={`${product.name} 판매 상태 편집`}>
+        <div className="accordion-sale-heading">
+          <div><strong>판매 상태</strong><small>상태와 판매 기간은 변경 즉시 이 기기에 저장됩니다.</small></div>
+          <span className="effective-status">현재 적용 <ProductStatusBadge product={product} showActive /></span>
+        </div>
+        <div className="accordion-sale-grid">
+          <label>
+            <span>판매 상태</span>
+            <select value={product.status} onChange={(event) => onProductChange({ status: event.target.value as ProductStatus, statusSource: "manual" })}>
+              {PRODUCT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>상태 적용 방식</span>
+            <select value={product.statusSource} onChange={(event) => onProductChange({ statusSource: event.target.value as ProductStatusSource })}>
+              <option value="manual">직접 지정</option>
+              <option value="automatic">판매 기간으로 자동</option>
+            </select>
+          </label>
+          <label>
+            <span>판매 시작일</span>
+            <input type="date" value={product.saleStartAt ?? ""} max={product.saleEndAt} onChange={(event) => onProductChange({ saleStartAt: event.target.value || undefined })} />
+          </label>
+          <label>
+            <span>판매 종료일</span>
+            <input type="date" value={product.saleEndAt ?? ""} min={product.saleStartAt} onChange={(event) => onProductChange({ saleEndAt: event.target.value || undefined })} />
+          </label>
+        </div>
+        <p>{product.statusSource === "automatic" ? "판매 시작 전에는 판매 예정, 판매 기간에는 판매 중, 종료 후에는 판매 종료로 표시합니다." : "직접 지정한 상태는 판매 기간보다 우선합니다."}</p>
+      </section>
 
       {!isReference && (
         <div className="accordion-result-strip">
