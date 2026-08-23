@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  CURRENT_PRODUCTS,
+  INITIAL_DATA_COUNTS,
+  MILEAGE_REFERENCES,
+  type CatalogProduct,
+} from "./product-data";
 
 type PriceBasis = "current" | "recent" | "direct";
 type FilterKey = "all" | "mileage" | "noMileage" | "sellable" | "good" | "bad";
@@ -16,21 +22,21 @@ type Settings = {
   showMileage: boolean;
 };
 
-type Product = {
-  id: string;
-  name: string;
-  category: string;
-  cashPrice: number;
-  currentPrice: number;
-  recentPrice: number;
-  directPrice: number;
+type ComponentMarketPrice = {
+  currentMarketPrice: number | null;
+  recentTradePrice: number | null;
+  manuallyConfirmedPrice: number | null;
+};
+
+type ProductPriceData = {
   priceBasis: PriceBasis;
-  mileageEligible: boolean;
-  sellable: boolean;
-  saleLimit: number;
+  componentPrices: Record<string, ComponentMarketPrice>;
+  saleLimit: number | null;
   note: string;
   updatedAt: string;
 };
+
+type PriceDataMap = Record<string, ProductPriceData>;
 
 type PlanItem = {
   id: string;
@@ -39,9 +45,10 @@ type PlanItem = {
   useMileage: boolean;
 };
 
-type ProductDraft = Product & { isNew?: boolean };
+type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
+const STORAGE_VERSION = 2;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -54,78 +61,22 @@ const DEFAULT_SETTINGS: Settings = {
   showMileage: true,
 };
 
-const DEFAULT_PRODUCTS: Product[] = [
-  {
-    id: "sample-red-cube",
-    name: "레드 큐브 1개",
-    category: "큐브",
-    cashPrice: 5900,
-    currentPrice: 4.1,
-    recentPrice: 3.98,
-    directPrice: 4.1,
-    priceBasis: "current",
-    mileageEligible: true,
-    sellable: true,
-    saleLimit: 20,
-    note: "예시 데이터입니다. 실제 경매장 가격으로 수정하세요.",
-    updatedAt: "2026-08-22T09:30",
-  },
-  {
-    id: "sample-black-cube",
-    name: "블랙 큐브 1개",
-    category: "큐브",
-    cashPrice: 10800,
-    currentPrice: 6.74,
-    recentPrice: 6.92,
-    directPrice: 6.74,
-    priceBasis: "recent",
-    mileageEligible: true,
-    sellable: true,
-    saleLimit: 12,
-    note: "최근 체결가를 기준으로 둔 예시입니다.",
-    updatedAt: "2026-08-21T22:10",
-  },
-  {
-    id: "sample-royal",
-    name: "로얄 스타일 1개",
-    category: "로얄 스타일",
-    cashPrice: 2200,
-    currentPrice: 1.24,
-    recentPrice: 1.16,
-    directPrice: 1.2,
-    priceBasis: "current",
-    mileageEligible: false,
-    sellable: true,
-    saleLimit: 30,
-    note: "판매 속도와 시세 변동을 함께 고려하세요.",
-    updatedAt: "2026-08-20T18:45",
-  },
-  {
-    id: "sample-warning",
-    name: "가격 괴리 확인용 상품",
-    category: "기타",
-    cashPrice: 7900,
-    currentPrice: 2.22,
-    recentPrice: 18.89,
-    directPrice: 2.22,
-    priceBasis: "current",
-    mileageEligible: false,
-    sellable: false,
-    saleLimit: 0,
-    note: "현재 매물과 최근 체결가의 차이를 확인하는 예시입니다.",
-    updatedAt: "2026-08-18T13:05",
-  },
-];
+const DEFAULT_PRODUCTS = CURRENT_PRODUCTS;
 
 const BASIS_LABEL: Record<PriceBasis, string> = {
   current: "현재 최저가",
   recent: "최근 체결가",
-  direct: "직접 입력가",
+  direct: "직접 확인가",
 };
 
 function safeNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+}
+
+function optionalNumber(value: string) {
+  if (!value.trim()) return null;
+  return safeNumber(value);
 }
 
 function formatNumber(value: number, digits = 0) {
@@ -137,11 +88,17 @@ function formatNumber(value: number, digits = 0) {
 }
 
 function formatWon(value: number) {
+  if (!Number.isFinite(value)) return "—";
   return `${formatNumber(Math.round(value))}원`;
 }
 
 function formatEok(value: number) {
+  if (!Number.isFinite(value)) return "—";
   return `${formatNumber(value, 2)}억`;
+}
+
+function formatOptionalEok(value: number) {
+  return value > 0 ? formatEok(value) : "—";
 }
 
 function formatDate(value: string) {
@@ -156,26 +113,122 @@ function formatDate(value: string) {
   }).format(date);
 }
 
-function nowForInput() {
-  const date = new Date();
-  const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+function emptyComponentMarketPrice(): ComponentMarketPrice {
+  return {
+    currentMarketPrice: null,
+    recentTradePrice: null,
+    manuallyConfirmedPrice: null,
+  };
 }
 
-function selectedPrice(product: Product) {
-  if (product.priceBasis === "recent") return product.recentPrice;
-  if (product.priceBasis === "direct") return product.directPrice;
-  return product.currentPrice;
+function createEmptyProductPrice(product: CatalogProduct): ProductPriceData {
+  return {
+    priceBasis: "current",
+    componentPrices: Object.fromEntries(product.components.map((component) => [component.id, emptyComponentMarketPrice()])),
+    saleLimit: null,
+    note: "",
+    updatedAt: "",
+  };
 }
 
-function divergence(product: Product) {
-  if (product.currentPrice <= 0 || product.recentPrice <= 0) return 0;
-  return ((product.recentPrice - product.currentPrice) / product.currentPrice) * 100;
+function createInitialPriceData(products: CatalogProduct[]): PriceDataMap {
+  return Object.fromEntries(products.map((item) => [item.id, createEmptyProductPrice(item)]));
 }
 
-function calculate(product: Product, settings: Settings, mileage = false) {
-  const useMileage = mileage && product.mileageEligible;
-  const salePrice = selectedPrice(product);
+function getProductPrice(priceData: PriceDataMap, product: CatalogProduct) {
+  return priceData[product.id] ?? createEmptyProductPrice(product);
+}
+
+function normalizeNullableNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function normalizeProductPrice(product: CatalogProduct, saved?: Partial<ProductPriceData>): ProductPriceData {
+  const componentPrices = Object.fromEntries(product.components.map((component) => {
+    const price = saved?.componentPrices?.[component.id];
+    return [component.id, {
+      currentMarketPrice: normalizeNullableNumber(price?.currentMarketPrice),
+      recentTradePrice: normalizeNullableNumber(price?.recentTradePrice),
+      manuallyConfirmedPrice: normalizeNullableNumber(price?.manuallyConfirmedPrice),
+    }];
+  }));
+  return {
+    priceBasis: saved?.priceBasis === "recent" || saved?.priceBasis === "direct" ? saved.priceBasis : "current",
+    componentPrices,
+    saleLimit: normalizeNullableNumber(saved?.saleLimit),
+    note: typeof saved?.note === "string" ? saved.note : "",
+    updatedAt: typeof saved?.updatedAt === "string" ? saved.updatedAt : "",
+  };
+}
+
+function normalizePriceData(products: CatalogProduct[], saved?: PriceDataMap): PriceDataMap {
+  return Object.fromEntries(products.map((item) => [item.id, normalizeProductPrice(item, saved?.[item.id])]));
+}
+
+function migrateLegacyPriceData(products: CatalogProduct[], legacyProducts: unknown): PriceDataMap {
+  const migrated = createInitialPriceData(products);
+  if (!Array.isArray(legacyProducts)) return migrated;
+  for (const item of products) {
+    const legacy = legacyProducts.find((candidate) => candidate && typeof candidate === "object" && "name" in candidate && candidate.name === item.name);
+    if (!legacy || typeof legacy !== "object") continue;
+    const record = legacy as Record<string, unknown>;
+    const component = item.components[0];
+    migrated[item.id] = {
+      priceBasis: record.priceBasis === "recent" || record.priceBasis === "direct" ? record.priceBasis : "current",
+      componentPrices: {
+        ...migrated[item.id].componentPrices,
+        [component.id]: {
+          currentMarketPrice: normalizeNullableNumber(record.currentPrice),
+          recentTradePrice: normalizeNullableNumber(record.recentPrice),
+          manuallyConfirmedPrice: normalizeNullableNumber(record.directPrice),
+        },
+      },
+      saleLimit: normalizeNullableNumber(record.saleLimit),
+      note: typeof record.note === "string" ? record.note : "",
+      updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
+    };
+  }
+  return migrated;
+}
+
+function componentPriceForBasis(price: ComponentMarketPrice, basis: PriceBasis) {
+  if (basis === "recent") return price.recentTradePrice ?? 0;
+  if (basis === "direct") return price.manuallyConfirmedPrice ?? 0;
+  return price.currentMarketPrice ?? 0;
+}
+
+function selectedPrice(product: CatalogProduct, priceData: ProductPriceData) {
+  return product.components.reduce((total, component) => {
+    const price = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
+    return total + componentPriceForBasis(price, priceData.priceBasis) * component.quantity;
+  }, 0);
+}
+
+function aggregatePrice(product: CatalogProduct, priceData: ProductPriceData, basis: PriceBasis) {
+  return product.components.reduce((total, component) => {
+    const price = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
+    return total + componentPriceForBasis(price, basis) * component.quantity;
+  }, 0);
+}
+
+function divergence(product: CatalogProduct, priceData: ProductPriceData) {
+  const current = aggregatePrice(product, priceData, "current");
+  const recent = aggregatePrice(product, priceData, "recent");
+  if (current <= 0 || recent <= 0) return 0;
+  return ((recent - current) / current) * 100;
+}
+
+function totalQuantity(product: CatalogProduct) {
+  return product.components.reduce((sum, component) => sum + component.quantity, 0);
+}
+
+function excludedQuantity(product: CatalogProduct) {
+  return product.excludedComponents.reduce((sum, component) => sum + component.quantity, 0);
+}
+
+function calculate(product: CatalogProduct, priceData: ProductPriceData, settings: Settings, mileage = false) {
+  const useMileage = mileage && product.mileage30Eligible;
+  const salePrice = selectedPrice(product, priceData);
   const netMeso = salePrice * (1 - settings.auctionFee / 100);
   const cashFace = product.cashPrice * (useMileage ? 0.7 : 1);
   const actualCash = cashFace * (1 - settings.giftDiscount / 100);
@@ -187,8 +240,8 @@ function calculate(product: Product, settings: Settings, mileage = false) {
   const cashPerEok = netMeso > 0 ? actualCash / netMeso : Number.POSITIVE_INFINITY;
   const economicPerEok = netMeso > 0 ? economicCost / netMeso : Number.POSITIVE_INFINITY;
   const primaryPerEok = settings.mileageMode === "direct" ? economicPerEok : cashPerEok;
-  const gapWon = settings.mesoPrice - primaryPerEok;
-  const gapPercent = settings.mesoPrice > 0 ? (gapWon / settings.mesoPrice) * 100 : 0;
+  const gapWon = Number.isFinite(primaryPerEok) ? settings.mesoPrice - primaryPerEok : 0;
+  const gapPercent = settings.mesoPrice > 0 && Number.isFinite(primaryPerEok) ? (gapWon / settings.mesoPrice) * 100 : 0;
 
   return {
     salePrice,
@@ -252,10 +305,9 @@ function NumberField({
 
 export default function Home() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
-  const [plan, setPlan] = useState<PlanItem[]>([
-    { id: "starter-plan", productId: DEFAULT_PRODUCTS[0].id, quantity: 1, useMileage: false },
-  ]);
+  const [products, setProducts] = useState<CatalogProduct[]>(DEFAULT_PRODUCTS);
+  const [priceData, setPriceData] = useState<PriceDataMap>(() => createInitialPriceData(DEFAULT_PRODUCTS));
+  const [plan, setPlan] = useState<PlanItem[]>([]);
   const [goalCash, setGoalCash] = useState(1500000);
   const [hydrated, setHydrated] = useState(false);
   const [search, setSearch] = useState("");
@@ -272,8 +324,17 @@ export default function Home() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.settings) setSettings({ ...DEFAULT_SETTINGS, ...parsed.settings });
-        if (Array.isArray(parsed.products)) setProducts(parsed.products);
-        if (Array.isArray(parsed.plan)) setPlan(parsed.plan);
+        const nextProducts = parsed.version === STORAGE_VERSION && Array.isArray(parsed.products)
+          ? parsed.products as CatalogProduct[]
+          : DEFAULT_PRODUCTS;
+        setProducts(nextProducts);
+        setPriceData(parsed.version === STORAGE_VERSION
+          ? normalizePriceData(nextProducts, parsed.priceData)
+          : migrateLegacyPriceData(nextProducts, parsed.products));
+        if (Array.isArray(parsed.plan)) {
+          const validIds = new Set(nextProducts.map((item) => item.id));
+          setPlan(parsed.plan.filter((item: PlanItem) => validIds.has(item.productId)));
+        }
         if (typeof parsed.goalCash === "number") setGoalCash(parsed.goalCash);
       }
     } catch {
@@ -287,9 +348,9 @@ export default function Home() {
     if (!hydrated) return;
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ version: 1, settings, products, plan, goalCash }),
+      JSON.stringify({ version: STORAGE_VERSION, settings, products, priceData, plan, goalCash }),
     );
-  }, [settings, products, plan, goalCash, hydrated]);
+  }, [settings, products, priceData, plan, goalCash, hydrated]);
 
   useEffect(() => {
     if (!notice) return;
@@ -312,37 +373,40 @@ export default function Home() {
     const normalized = search.trim().toLocaleLowerCase("ko-KR");
     return products
       .filter((product) => {
-        const base = calculate(product, settings);
-        const matchSearch = !normalized || product.name.toLocaleLowerCase("ko-KR").includes(normalized);
+        const productPrice = getProductPrice(priceData, product);
+        const base = calculate(product, productPrice, settings);
+        const matchSearch = !normalized || `${product.name} ${product.category} ${product.subcategory ?? ""}`.toLocaleLowerCase("ko-KR").includes(normalized);
         if (!matchSearch) return false;
-        if (filter === "mileage") return product.mileageEligible;
-        if (filter === "noMileage") return !product.mileageEligible;
-        if (filter === "sellable") return product.sellable;
+        if (filter === "mileage") return product.mileage30Eligible;
+        if (filter === "noMileage") return !product.mileage30Eligible;
+        if (filter === "sellable") return product.active;
         if (filter === "good") return base.gapPercent > 2;
         if (filter === "bad") return base.gapPercent < -2;
         return true;
       })
       .sort((a, b) => {
-        const aBase = calculate(a, settings);
-        const bBase = calculate(b, settings);
+        const aPrice = getProductPrice(priceData, a);
+        const bPrice = getProductPrice(priceData, b);
+        const aBase = calculate(a, aPrice, settings);
+        const bBase = calculate(b, bPrice, settings);
         if (sort === "mileage") {
-          const aValue = a.mileageEligible ? calculate(a, settings, true).primaryPerEok : Number.POSITIVE_INFINITY;
-          const bValue = b.mileageEligible ? calculate(b, settings, true).primaryPerEok : Number.POSITIVE_INFINITY;
+          const aValue = a.mileage30Eligible ? calculate(a, aPrice, settings, true).primaryPerEok : Number.POSITIVE_INFINITY;
+          const bValue = b.mileage30Eligible ? calculate(b, bPrice, settings, true).primaryPerEok : Number.POSITIVE_INFINITY;
           return aValue - bValue;
         }
         if (sort === "cash") return a.cashPrice - b.cashPrice;
-        if (sort === "price") return selectedPrice(a) - selectedPrice(b);
+        if (sort === "price") return selectedPrice(a, aPrice) - selectedPrice(b, bPrice);
         if (sort === "comparison") return bBase.gapPercent - aBase.gapPercent;
-        if (sort === "updated") return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        if (sort === "updated") return new Date(bPrice.updatedAt || 0).getTime() - new Date(aPrice.updatedAt || 0).getTime();
         return aBase.primaryPerEok - bBase.primaryPerEok;
       });
-  }, [products, search, filter, sort, settings]);
+  }, [products, priceData, search, filter, sort, settings]);
 
   const bestProduct = useMemo(() => {
     return products
-      .filter((product) => product.sellable && selectedPrice(product) > 0)
-      .sort((a, b) => calculate(a, settings).primaryPerEok - calculate(b, settings).primaryPerEok)[0];
-  }, [products, settings]);
+      .filter((product) => product.active && selectedPrice(product, getProductPrice(priceData, product)) > 0)
+      .sort((a, b) => calculate(a, getProductPrice(priceData, a), settings).primaryPerEok - calculate(b, getProductPrice(priceData, b), settings).primaryPerEok)[0];
+  }, [products, priceData, settings]);
 
   const detailProduct = products.find((product) => product.id === detailId) ?? null;
 
@@ -351,8 +415,8 @@ export default function Home() {
       (totals, item) => {
         const product = products.find((candidate) => candidate.id === item.productId);
         if (!product) return totals;
-        const useMileage = item.useMileage && product.mileageEligible;
-        const result = calculate(product, settings, useMileage);
+        const useMileage = item.useMileage && product.mileage30Eligible;
+        const result = calculate(product, getProductPrice(priceData, product), settings, useMileage);
         const quantity = Math.max(0, item.quantity);
         totals.cashPurchased += product.cashPrice * quantity;
         totals.actualCash += result.actualCash * quantity;
@@ -364,7 +428,7 @@ export default function Home() {
       },
       { cashPurchased: 0, actualCash: 0, economicCost: 0, mileageUsed: 0, earnedMileage: 0, netMeso: 0 },
     );
-  }, [plan, products, settings]);
+  }, [plan, products, priceData, settings]);
 
   const planMarketValue = planTotals.netMeso * settings.mesoPrice;
   const planCost = settings.mileageMode === "direct" ? planTotals.economicCost : planTotals.actualCash;
@@ -377,27 +441,58 @@ export default function Home() {
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
-  const updateProduct = (id: string, changes: Partial<Product>) => {
+  const updateProduct = (id: string, changes: Partial<CatalogProduct>) => {
     setProducts((current) => current.map((product) => (product.id === id ? { ...product, ...changes } : product)));
   };
 
+  const updateProductPrice = (id: string, changes: Partial<ProductPriceData>) => {
+    const product = products.find((candidate) => candidate.id === id);
+    if (!product) return;
+    setPriceData((current) => ({
+      ...current,
+      [id]: { ...getProductPrice(current, product), ...changes },
+    }));
+  };
+
   const openNewProduct = () => {
+    const id = `user-${newPlanId()}`;
     setEditor({
-      id: "",
+      id,
       name: "",
-      category: "기타",
+      category: "사용자 추가",
+      subcategory: "",
       cashPrice: 0,
-      currentPrice: 0,
-      recentPrice: 0,
-      directPrice: 0,
-      priceBasis: "current",
-      mileageEligible: false,
-      sellable: true,
-      saleLimit: 1,
-      note: "",
-      updatedAt: nowForInput(),
+      mileage30Eligible: false,
+      active: true,
+      components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
+      excludedComponents: [],
+      checkedAt: new Date().toISOString().slice(0, 10),
+      ...createEmptyProductPrice({
+        id,
+        name: "",
+        category: "사용자 추가",
+        cashPrice: 0,
+        mileage30Eligible: false,
+        active: true,
+        components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
+        excludedComponents: [],
+        checkedAt: new Date().toISOString().slice(0, 10),
+      }),
       isNew: true,
     });
+  };
+
+  const updateEditorComponentPrice = (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => {
+    setEditor((current) => current ? {
+      ...current,
+      componentPrices: {
+        ...current.componentPrices,
+        [componentId]: {
+          ...(current.componentPrices[componentId] ?? emptyComponentMarketPrice()),
+          [key]: value,
+        },
+      },
+    } : current);
   };
 
   const saveProduct = () => {
@@ -405,29 +500,40 @@ export default function Home() {
       setNotice("상품명과 캐시 가격을 확인해 주세요.");
       return;
     }
-    const { isNew, ...productFields } = editor;
+    const { isNew, priceBasis, componentPrices, saleLimit, note, updatedAt, ...productFields } = editor;
+    const normalizedProduct: CatalogProduct = {
+      ...productFields,
+      name: productFields.name.trim(),
+      subcategory: productFields.subcategory?.trim() || undefined,
+      components: productFields.components.map((component) => ({
+        ...component,
+        name: component.name.trim() || productFields.name.trim(),
+        quantity: Math.max(1, Math.floor(component.quantity)),
+      })),
+    };
+    const normalizedPrice: ProductPriceData = { priceBasis, componentPrices, saleLimit, note, updatedAt };
     if (isNew) {
-      const product: Product = { ...productFields, id: newPlanId() };
-      setProducts((current) => [...current, product]);
+      setProducts((current) => [...current, normalizedProduct]);
+      setPriceData((current) => ({ ...current, [normalizedProduct.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
       setNotice("새 상품을 추가했어요.");
     } else {
-      setProducts((current) => current.map((product) => (product.id === editor.id ? productFields : product)));
+      setProducts((current) => current.map((product) => (product.id === editor.id ? normalizedProduct : product)));
+      setPriceData((current) => ({ ...current, [editor.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
       setNotice("상품 정보를 저장했어요.");
     }
     setEditor(null);
   };
 
-  const deleteProduct = (product: Product) => {
-    if (!window.confirm(`‘${product.name}’ 상품을 삭제할까요?`)) return;
-    setProducts((current) => current.filter((candidate) => candidate.id !== product.id));
-    setPlan((current) => current.filter((item) => item.productId !== product.id));
+  const deactivateProduct = (product: CatalogProduct) => {
+    if (!window.confirm(`‘${product.name}’ 상품을 판매 종료로 표시할까요? 저장된 시세는 유지됩니다.`)) return;
+    updateProduct(product.id, { active: false });
     setDetailId(null);
     setEditor(null);
-    setNotice("상품을 삭제했어요.");
+    setNotice("판매 종료로 표시했어요. 저장된 시세는 유지됩니다.");
   };
 
   const addPlanItem = () => {
-    const product = products.find((candidate) => candidate.sellable) ?? products[0];
+    const product = products.find((candidate) => candidate.active) ?? products[0];
     if (!product) {
       setNotice("먼저 상품을 추가해 주세요.");
       return;
@@ -443,7 +549,7 @@ export default function Home() {
   };
 
   const exportData = () => {
-    const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), settings, products, plan, goalCash }, null, 2);
+    const payload = JSON.stringify({ version: STORAGE_VERSION, exportedAt: new Date().toISOString(), settings, products, priceData, plan, goalCash, mileageReferences: MILEAGE_REFERENCES }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -460,9 +566,14 @@ export default function Home() {
     try {
       const parsed = JSON.parse(await file.text());
       if (!parsed.settings || !Array.isArray(parsed.products)) throw new Error("invalid");
+      const importedProducts = parsed.version === STORAGE_VERSION ? parsed.products as CatalogProduct[] : DEFAULT_PRODUCTS;
       setSettings({ ...DEFAULT_SETTINGS, ...parsed.settings });
-      setProducts(parsed.products);
-      setPlan(Array.isArray(parsed.plan) ? parsed.plan : []);
+      setProducts(importedProducts);
+      setPriceData(parsed.version === STORAGE_VERSION
+        ? normalizePriceData(importedProducts, parsed.priceData)
+        : migrateLegacyPriceData(importedProducts, parsed.products));
+      const validIds = new Set(importedProducts.map((item) => item.id));
+      setPlan(Array.isArray(parsed.plan) ? parsed.plan.filter((item: PlanItem) => validIds.has(item.productId)) : []);
       setGoalCash(typeof parsed.goalCash === "number" ? parsed.goalCash : 1500000);
       setNotice("백업 데이터를 불러왔어요.");
     } catch {
@@ -470,7 +581,7 @@ export default function Home() {
     }
   };
 
-  const bestCalculation = bestProduct ? calculate(bestProduct, settings) : null;
+  const bestCalculation = bestProduct ? calculate(bestProduct, getProductPrice(priceData, bestProduct), settings) : null;
   const bestVerdict = bestCalculation ? verdict(bestCalculation.gapPercent) : null;
 
   return (
@@ -551,7 +662,7 @@ export default function Home() {
           <div>
             <span className="eyebrow warm">현재 가장 효율적인 선택</span>
             <h2>{bestProduct.name}</h2>
-            <p>{BASIS_LABEL[bestProduct.priceBasis]} {formatEok(bestCalculation.salePrice)} · 수수료 적용 실수령 {formatEok(bestCalculation.netMeso)}</p>
+            <p>{BASIS_LABEL[getProductPrice(priceData, bestProduct).priceBasis]} {formatEok(bestCalculation.salePrice)} · 수수료 적용 실수령 {formatEok(bestCalculation.netMeso)}</p>
           </div>
           <div className="metric">
             <span>1억당 실제 현금</span>
@@ -566,7 +677,7 @@ export default function Home() {
           <button className="best-detail" type="button" onClick={() => setDetailId(bestProduct.id)}>계산 근거 보기 <span>→</span></button>
         </section>
       ) : (
-        <section className="empty-best">판매 가능한 상품을 추가하면 가장 효율적인 선택을 보여드려요.</section>
+        <section className="empty-best">상품 또는 패키지 구성품의 경매장 가격을 입력하면 가장 효율적인 선택을 보여드려요.</section>
       )}
 
       <section className="products-section" id="products">
@@ -633,33 +744,38 @@ export default function Home() {
               </thead>
               <tbody>
                 {rankedProducts.map((product, index) => {
-                  const base = calculate(product, settings);
-                  const mileage = product.mileageEligible ? calculate(product, settings, true) : null;
-                  const state = verdict(base.gapPercent);
-                  const priceDivergence = divergence(product);
+                  const productPrice = getProductPrice(priceData, product);
+                  const base = calculate(product, productPrice, settings);
+                  const mileage = product.mileage30Eligible ? calculate(product, productPrice, settings, true) : null;
+                  const hasPrice = base.salePrice > 0;
+                  const state = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
+                  const priceDivergence = divergence(product, productPrice);
+                  const includedCount = totalQuantity(product);
+                  const excludedCount = excludedQuantity(product);
                   return (
-                    <tr key={product.id} className={!product.sellable ? "muted-row" : ""}>
+                    <tr key={product.id} className={!product.active ? "muted-row" : ""}>
                       <td>
                         <div className="product-cell">
-                          <span className="rank">{String(index + 1).padStart(2, "0")}</span>
+                          <span className="rank">{hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
                           <div>
                             <button className="product-name" type="button" onClick={() => setDetailId(product.id)}>{product.name}</button>
-                            <span className="product-meta">{product.category} · {product.sellable ? `최대 ${formatNumber(product.saleLimit)}개` : "판매 중지"}</span>
+                            <span className="product-meta">{product.category}{product.subcategory ? ` · ${product.subcategory}` : ""} · {product.active ? "판매 중" : "판매 종료"}</span>
+                            {(includedCount > 1 || excludedCount > 0) && <span className="product-meta">전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span>}
                             {Math.abs(priceDivergence) >= 50 && <span className="warning-line">! 가격 괴리 {priceDivergence >= 0 ? "+" : ""}{formatNumber(priceDivergence)}%</span>}
                           </div>
                         </div>
                       </td>
                       <td><strong>{formatNumber(product.cashPrice)}</strong><small>캐시</small></td>
                       <td>
-                        <strong>{formatEok(base.salePrice)}</strong>
-                        <select className="inline-select" value={product.priceBasis} onChange={(event) => updateProduct(product.id, { priceBasis: event.target.value as PriceBasis })} aria-label={`${product.name} 판매 가격 기준`}>
+                        <strong>{formatOptionalEok(base.salePrice)}</strong>
+                        <select className="inline-select" value={productPrice.priceBasis} onChange={(event) => updateProductPrice(product.id, { priceBasis: event.target.value as PriceBasis })} aria-label={`${product.name} 판매 가격 기준`}>
                           <option value="current">현재 최저가</option>
                           <option value="recent">최근 체결가</option>
                           <option value="direct">직접 입력가</option>
                         </select>
                       </td>
-                      <td><strong>{formatEok(base.netMeso)}</strong><small>수수료 {formatNumber(settings.auctionFee, 1)}%</small></td>
-                      <td>{product.mileageEligible ? <span className="yes-chip">30% 가능</span> : <span className="no-chip">사용 불가</span>}</td>
+                      <td><strong>{formatOptionalEok(base.netMeso)}</strong><small>수수료 {formatNumber(settings.auctionFee, 1)}%</small></td>
+                      <td>{product.mileage30Eligible ? <span className="yes-chip">30% 가능</span> : <span className="no-chip">사용 불가</span>}</td>
                       <td className="emphasis"><strong>{formatWon(base.primaryPerEok)}</strong>{settings.mileageMode === "direct" && <small>경제적 비용</small>}</td>
                       {settings.showMileage && (
                         <td className="emphasis mileage-value">
@@ -668,11 +784,11 @@ export default function Home() {
                       )}
                       <td>
                         <span className={`result-chip ${state.className}`}>{state.text}</span>
-                        <strong className={`comparison ${state.className}`}>{base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</strong>
-                        <small>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</small>
+                        <strong className={`comparison ${state.className}`}>{hasPrice ? <>{base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "—"}</strong>
+                        <small>{hasPrice ? <>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</> : "시세를 입력해 주세요"}</small>
                       </td>
-                      <td><strong className="date-value">{formatDate(product.updatedAt)}</strong><small>{BASIS_LABEL[product.priceBasis]}</small></td>
-                      <td><button className="icon-button" type="button" aria-label={`${product.name} 수정`} onClick={() => setEditor({ ...product })}>•••</button></td>
+                      <td><strong className="date-value">{formatDate(productPrice.updatedAt)}</strong><small>{BASIS_LABEL[productPrice.priceBasis]}</small></td>
+                      <td><button className="icon-button" type="button" aria-label={`${product.name} 수정`} onClick={() => setEditor({ ...product, ...productPrice })}>•••</button></td>
                     </tr>
                   );
                 })}
@@ -682,7 +798,7 @@ export default function Home() {
           {rankedProducts.length === 0 && (
             <div className="empty-state"><span>⌕</span><h3>조건에 맞는 상품이 없어요.</h3><p>검색어 또는 필터를 바꿔 보세요.</p></div>
           )}
-          <div className="table-footnote"><span>표시 가격은 저장된 사용자 입력값입니다.</span><span>{formatNumber(rankedProducts.length)}개 상품 표시 중</span></div>
+          <div className="table-footnote"><span>2026-08-23 판매 스냅샷 · 경매장 가격은 사용자 입력값만 사용합니다.</span><span>{formatNumber(rankedProducts.length)} / {formatNumber(INITIAL_DATA_COUNTS.currentProducts)}개 표시 중</span></div>
         </div>
       </section>
 
@@ -714,27 +830,28 @@ export default function Home() {
               <div className="plan-list-head"><span>사용 상품 구성</span><span>상품별 판매 한도를 적용해 주세요.</span></div>
               {plan.map((item, index) => {
                 const product = products.find((candidate) => candidate.id === item.productId);
-                const overLimit = product ? item.quantity > product.saleLimit : false;
+                const productPrice = product ? getProductPrice(priceData, product) : null;
+                const overLimit = !!(productPrice?.saleLimit && item.quantity > productPrice.saleLimit);
                 return (
                   <div className={`plan-row ${overLimit ? "over-limit" : ""}`} key={item.id}>
                     <span className="plan-number">{index + 1}</span>
                     <label>
                       <span className="visually-hidden">상품 선택</span>
                       <select value={item.productId} onChange={(event) => updatePlanItem(item.id, { productId: event.target.value, useMileage: false })}>
-                        {products.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
+                        {products.filter((candidate) => candidate.active).map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
                       </select>
-                      {product && <small>{formatNumber(product.cashPrice)}캐시 · 한도 {formatNumber(product.saleLimit)}개</small>}
+                      {product && <small>{formatNumber(product.cashPrice)}캐시 · {productPrice?.saleLimit ? `한도 ${formatNumber(productPrice.saleLimit)}개` : "한도 미설정"}</small>}
                     </label>
                     <label className="quantity-control">
                       <span>수량</span>
                       <input type="number" min="0" value={item.quantity} onChange={(event) => updatePlanItem(item.id, { quantity: Math.floor(safeNumber(event.target.value)) })} />
                     </label>
-                    <label className={`mini-check ${!product?.mileageEligible ? "disabled" : ""}`}>
-                      <input type="checkbox" disabled={!product?.mileageEligible} checked={item.useMileage && !!product?.mileageEligible} onChange={(event) => updatePlanItem(item.id, { useMileage: event.target.checked })} />
+                    <label className={`mini-check ${!product?.mileage30Eligible ? "disabled" : ""}`}>
+                      <input type="checkbox" disabled={!product?.mileage30Eligible} checked={item.useMileage && !!product?.mileage30Eligible} onChange={(event) => updatePlanItem(item.id, { useMileage: event.target.checked })} />
                       <span>마일30</span>
                     </label>
                     <button className="remove-button" type="button" aria-label={`${index + 1}번째 구성 삭제`} onClick={() => setPlan((current) => current.filter((candidate) => candidate.id !== item.id))}>×</button>
-                    {overLimit && <span className="limit-warning">설정한 판매 한도 {formatNumber(product?.saleLimit ?? 0)}개를 초과했어요.</span>}
+                    {overLimit && <span className="limit-warning">설정한 판매 한도 {formatNumber(productPrice?.saleLimit ?? 0)}개를 초과했어요.</span>}
                   </div>
                 );
               })}
@@ -780,7 +897,7 @@ export default function Home() {
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setDetailId(null)}>
           <section className="modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title" onMouseDown={(event) => event.stopPropagation()}>
             <button className="modal-close" type="button" aria-label="상세 닫기" onClick={() => setDetailId(null)}>×</button>
-            <ProductDetail product={detailProduct} settings={settings} onEdit={() => { setEditor({ ...detailProduct }); setDetailId(null); }} />
+            <ProductDetail product={detailProduct} priceData={getProductPrice(priceData, detailProduct)} settings={settings} onEdit={() => { setEditor({ ...detailProduct, ...getProductPrice(priceData, detailProduct) }); setDetailId(null); }} />
           </section>
         </div>
       )}
@@ -793,21 +910,39 @@ export default function Home() {
             <h2 id="editor-title">{editor.isNew ? "새 상품 추가" : "상품 정보 수정"}</h2>
             <p className="modal-lead">가격은 억 메소 단위로 입력합니다. 변경 내용은 이 기기에 자동 저장됩니다.</p>
             <div className="editor-grid">
-              <label className="full"><span>상품명</span><input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="예: 레드 큐브 1개" autoFocus /></label>
-              <label><span>카테고리</span><input value={editor.category} onChange={(event) => setEditor({ ...editor, category: event.target.value })} /></label>
+              <label className="full"><span>상품명</span><input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="예: 플래티넘 카르마의 가위" autoFocus /></label>
+              <label><span>카테고리</span><select value={editor.category} onChange={(event) => setEditor({ ...editor, category: event.target.value as CatalogProduct["category"] })}><option value="기본">기본</option><option value="확률형">확률형</option><option value="번들">번들</option><option value="쿠폰">쿠폰</option><option value="직업 코디">직업 코디</option><option value="보스 코디">보스 코디</option><option value="사용자 추가">사용자 추가</option></select></label>
+              <label><span>세부 분류</span><input value={editor.subcategory ?? ""} onChange={(event) => setEditor({ ...editor, subcategory: event.target.value })} placeholder="예: 모험가" /></label>
               <label><span>캐시 가격</span><span className="affix-input"><input type="number" min="0" value={editor.cashPrice} onChange={(event) => setEditor({ ...editor, cashPrice: safeNumber(event.target.value) })} /><small>캐시</small></span></label>
-              <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={editor.currentPrice} onChange={(event) => setEditor({ ...editor, currentPrice: safeNumber(event.target.value) })} /><small>억</small></span></label>
-              <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={editor.recentPrice} onChange={(event) => setEditor({ ...editor, recentPrice: safeNumber(event.target.value) })} /><small>억</small></span></label>
-              <label><span>직접 입력가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={editor.directPrice} onChange={(event) => setEditor({ ...editor, directPrice: safeNumber(event.target.value) })} /><small>억</small></span></label>
-              <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option><option value="direct">직접 입력가</option></select></label>
-              <label><span>예상 판매 가능 수량</span><span className="affix-input"><input type="number" min="0" value={editor.saleLimit} onChange={(event) => setEditor({ ...editor, saleLimit: Math.floor(safeNumber(event.target.value)) })} /><small>개</small></span></label>
+              <label><span>판매 스냅샷 확인일</span><input type="date" value={editor.checkedAt} onChange={(event) => setEditor({ ...editor, checkedAt: event.target.value })} /></label>
+              <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option><option value="direct">직접 확인가</option></select></label>
+              <label><span>예상 판매 가능 수량</span><span className="affix-input"><input type="number" min="0" value={editor.saleLimit ?? ""} placeholder="미설정" onChange={(event) => setEditor({ ...editor, saleLimit: optionalNumber(event.target.value) })} /><small>개</small></span></label>
               <label><span>마지막 가격 확인</span><input type="datetime-local" value={editor.updatedAt.slice(0, 16)} onChange={(event) => setEditor({ ...editor, updatedAt: event.target.value })} /></label>
-              <label className="editor-check"><input type="checkbox" checked={editor.mileageEligible} onChange={(event) => setEditor({ ...editor, mileageEligible: event.target.checked })} /><span><b>마일리지 30% 사용 가능</b><small>미적용·적용 효율을 함께 계산합니다.</small></span></label>
-              <label className="editor-check"><input type="checkbox" checked={editor.sellable} onChange={(event) => setEditor({ ...editor, sellable: event.target.checked })} /><span><b>현재 판매 가능</b><small>가장 효율적인 상품 후보에 포함합니다.</small></span></label>
+              <label className="editor-check"><input type="checkbox" checked={editor.mileage30Eligible} onChange={(event) => setEditor({ ...editor, mileage30Eligible: event.target.checked })} /><span><b>마일리지 30% 사용 가능</b><small>미적용·적용 효율을 함께 계산합니다.</small></span></label>
+              <label className="editor-check"><input type="checkbox" checked={editor.active} onChange={(event) => setEditor({ ...editor, active: event.target.checked })} /><span><b>현재 판매 중</b><small>끄면 시세를 보존한 채 판매 종료로 표시합니다.</small></span></label>
+              <section className="component-price-editor full">
+                <div className="component-editor-heading">
+                  <div><strong>판매가 합산 구성품</strong><small>구성품별 경매장 가격을 억 메소 단위로 입력합니다.</small></div>
+                  <span>전체 {totalQuantity(editor) + excludedQuantity(editor)}개 · 합산 {totalQuantity(editor)}개{excludedQuantity(editor) > 0 ? ` · 계산 제외 ${excludedQuantity(editor)}개` : ""}</span>
+                </div>
+                <div className="component-price-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span><span>직접 확인가</span></div>
+                {editor.components.map((component) => {
+                  const componentPrice = editor.componentPrices[component.id] ?? emptyComponentMarketPrice();
+                  return (
+                    <div className="component-price-row" key={component.id}>
+                      <span className="component-name">{component.name || editor.name || "상품명과 동일"}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span>
+                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 현재 최저가`} onChange={(event) => updateEditorComponentPrice(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span>
+                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 최근 체결가`} onChange={(event) => updateEditorComponentPrice(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span>
+                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.manuallyConfirmedPrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 직접 확인가`} onChange={(event) => updateEditorComponentPrice(component.id, "manuallyConfirmedPrice", optionalNumber(event.target.value))} /><small>억</small></span>
+                    </div>
+                  );
+                })}
+                {editor.excludedComponents.length > 0 && <div className="excluded-components"><strong>계산 제외 구성품</strong><span>{editor.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
+              </section>
               <label className="full"><span>메모</span><textarea value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} placeholder="판매 속도, 시세 특이사항 등을 기록하세요." /></label>
             </div>
             <div className="modal-actions">
-              {!editor.isNew && <button className="danger-button" type="button" onClick={() => deleteProduct(editor)}>상품 삭제</button>}
+              {!editor.isNew && editor.active && <button className="danger-button" type="button" onClick={() => deactivateProduct(editor)}>판매 종료 처리</button>}
               <button className="secondary-button" type="button" onClick={() => setEditor(null)}>취소</button>
               <button className="primary-button" type="button" onClick={saveProduct}>저장하기</button>
             </div>
@@ -820,32 +955,40 @@ export default function Home() {
   );
 }
 
-function ProductDetail({ product, settings, onEdit }: { product: Product; settings: Settings; onEdit: () => void }) {
-  const base = calculate(product, settings);
-  const mileage = product.mileageEligible ? calculate(product, settings, true) : null;
-  const baseVerdict = verdict(base.gapPercent);
-  const priceDivergence = divergence(product);
+function ProductDetail({ product, priceData, settings, onEdit }: { product: CatalogProduct; priceData: ProductPriceData; settings: Settings; onEdit: () => void }) {
+  const base = calculate(product, priceData, settings);
+  const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
+  const hasPrice = base.salePrice > 0;
+  const baseVerdict = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
+  const priceDivergence = divergence(product, priceData);
+  const includedCount = totalQuantity(product);
+  const excludedCount = excludedQuantity(product);
 
   return (
     <>
       <span className="eyebrow">CALCULATION DETAIL</span>
       <div className="detail-title-row">
-        <div><h2 id="detail-title">{product.name}</h2><p>{product.category} · {BASIS_LABEL[product.priceBasis]} 기준</p></div>
+        <div><h2 id="detail-title">{product.name}</h2><p>{product.category}{product.subcategory ? ` · ${product.subcategory}` : ""} · {BASIS_LABEL[priceData.priceBasis]} 기준 · 판매 확인 {product.checkedAt}</p></div>
         <button className="secondary-button" type="button" onClick={onEdit}>상품 정보 수정</button>
       </div>
       {Math.abs(priceDivergence) >= 50 && (
         <div className="price-warning"><strong>가격 차이를 확인해 주세요.</strong><span>현재 매물과 최근 체결가의 괴리율이 {priceDivergence >= 0 ? "+" : ""}{formatNumber(priceDivergence)}%입니다. 자동으로 가격 기준을 바꾸지 않았습니다.</span></div>
       )}
       <div className="detail-result">
-        <div><span>미적용 1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</small></div>
-        <div><span>판정</span><strong className={baseVerdict.className}>{baseVerdict.text}</strong><small>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</small></div>
+        <div><span>미적용 1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "구성품 시세를 입력해 주세요"}</small></div>
+        <div><span>판정</span><strong className={baseVerdict.className}>{baseVerdict.text}</strong><small>{hasPrice ? <>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</> : "계산 대기"}</small></div>
         {mileage && <div className="mileage-highlight"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일리지 사용</small></div>}
       </div>
       <div className="formula-grid">
-        <FormulaBlock title="A. 마일리지 미적용" calculation={base} product={product} settings={settings} />
-        {mileage && <FormulaBlock title="B. 마일리지 30% 적용" calculation={mileage} product={product} settings={settings} mileage />}
+        <FormulaBlock title="A. 마일리지 미적용" calculation={base} product={product} priceData={priceData} settings={settings} />
+        {mileage && <FormulaBlock title="B. 마일리지 30% 적용" calculation={mileage} product={product} priceData={priceData} settings={settings} mileage />}
       </div>
-      {product.note && <div className="detail-note"><span>메모</span><p>{product.note}</p></div>}
+      <section className="component-detail">
+        <div className="component-detail-heading"><strong>패키지 구성</strong><span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span></div>
+        <ul>{product.components.map((component) => <li key={component.id}><span>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span><b>{formatOptionalEok(componentPriceForBasis(priceData.componentPrices[component.id] ?? emptyComponentMarketPrice(), priceData.priceBasis) * component.quantity)}</b></li>)}</ul>
+        {excludedCount > 0 && <div className="excluded-components"><strong>계산 제외</strong><span>{product.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
+      </section>
+      {priceData.note && <div className="detail-note"><span>메모</span><p>{priceData.note}</p></div>}
     </>
   );
 }
@@ -854,12 +997,14 @@ function FormulaBlock({
   title,
   calculation,
   product,
+  priceData,
   settings,
   mileage = false,
 }: {
   title: string;
   calculation: ReturnType<typeof calculate>;
-  product: Product;
+  product: CatalogProduct;
+  priceData: ProductPriceData;
   settings: Settings;
   mileage?: boolean;
 }) {
@@ -873,9 +1018,9 @@ function FormulaBlock({
         {mileage && <div><dt>사용 마일리지</dt><dd>{formatNumber(calculation.mileageUsed)}마일 <small>정가 × 30%</small></dd></div>}
         {settings.mileageMode === "direct" && mileage && <div><dt>마일리지 가치</dt><dd>{formatWon(calculation.mileageValue)} <small>{formatNumber(calculation.mileageUsed)} × {formatNumber(settings.mileageWon, 2)}원</small></dd></div>}
         {settings.includeMileageEarned && <div><dt>예상 적립 마일리지</dt><dd>{formatNumber(calculation.earnedMileage)}마일 <small>결제 대상 캐시 × 5%</small></dd></div>}
-        <div><dt>판매 기준가</dt><dd>{formatEok(calculation.salePrice)} <small>{BASIS_LABEL[product.priceBasis]}</small></dd></div>
-        <div><dt>경매장 수수료</dt><dd>-{formatEok(calculation.salePrice - calculation.netMeso)} <small>{formatNumber(settings.auctionFee, 1)}%</small></dd></div>
-        <div><dt>실수령 메소</dt><dd>{formatEok(calculation.netMeso)} <small>판매가 × (1 - 수수료)</small></dd></div>
+        <div><dt>판매 기준가</dt><dd>{formatOptionalEok(calculation.salePrice)} <small>{BASIS_LABEL[priceData.priceBasis]} · 구성품 합산</small></dd></div>
+        <div><dt>경매장 수수료</dt><dd>{calculation.salePrice > 0 ? `-${formatEok(calculation.salePrice - calculation.netMeso)}` : "—"} <small>{formatNumber(settings.auctionFee, 1)}%</small></dd></div>
+        <div><dt>실수령 메소</dt><dd>{formatOptionalEok(calculation.netMeso)} <small>판매가 × (1 - 수수료)</small></dd></div>
         <div className="formula-total"><dt>{settings.mileageMode === "direct" ? "경제적 총비용" : "실제 현금 지출"}</dt><dd>{formatWon(calculation.economicCost)}</dd></div>
         <div className="formula-final"><dt>1억당 현금</dt><dd>{formatWon(calculation.primaryPerEok)} <small>총비용 ÷ 실수령 억 메소</small></dd></div>
       </dl>

@@ -827,3 +827,81 @@ footer > small,
   .editor-grid input:not([type="checkbox"]),
   .editor-grid textarea { font-size: 16px; }
 }
+
+/* Component-level market prices for packages and single-item products. */
+.editor-modal { width: min(1080px, 100%); }
+.editor-grid > .full { grid-column: 1 / -1; }
+.component-price-editor,
+.component-detail {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fcfbf9;
+}
+.component-price-editor { padding: 18px; }
+.component-editor-heading,
+.component-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.component-editor-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.component-editor-heading strong,
+.component-detail-heading strong,
+.excluded-components strong { color: var(--ink); font-size: 15px; font-weight: 600; }
+.component-editor-heading small,
+.component-editor-heading > span,
+.component-detail-heading > span,
+.excluded-components span { color: var(--muted); font-size: 14px; line-height: 1.55; }
+.component-price-head,
+.component-price-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.45fr) repeat(3, minmax(150px, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+.component-price-head {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  background: #f5f0eb;
+  font-size: 14px;
+  font-weight: 600;
+}
+.component-price-head span:not(:first-child) { text-align: right; }
+.component-price-row { padding: 10px 0; border-bottom: 1px solid #eee8e2; }
+.component-price-row:last-of-type { border-bottom: 0; }
+.component-name { color: var(--ink); font-size: 15px; font-weight: 500; line-height: 1.45; }
+.component-price-row .affix-input input { padding-left: 10px; text-align: right; }
+.excluded-components {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f7efe3;
+}
+.excluded-components strong { flex: 0 0 auto; color: #8c6a46; }
+.component-detail { margin-top: 14px; padding: 16px; }
+.component-detail ul { margin: 12px 0 0; padding: 0; list-style: none; }
+.component-detail li {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 9px 2px;
+  border-bottom: 1px solid #eee8e2;
+  font-size: 14px;
+}
+.component-detail li:last-child { border-bottom: 0; }
+.component-detail li b { color: #55443a; font-size: 15px; font-weight: 600; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .editor-grid > .full { grid-column: auto; }
+  .component-editor-heading,
+  .component-detail-heading { flex-direction: column; gap: 5px; }
+  .component-price-head { display: none; }
+  .component-price-row { grid-template-columns: 1fr; gap: 8px; padding: 15px 0; }
+  .component-name { margin-bottom: 2px; }
+  .excluded-components { flex-direction: column; gap: 4px; }
+}
