@@ -1302,9 +1302,9 @@ function ProductAccordionDetails({
       {!isReference && (
         <div className="accordion-result-strip">
           <div><span>캐시 가격</span><strong>{formatNumber(product.cashPrice)}캐시</strong></div>
-          <div><span>판매 기준가</span><strong>{formatOptionalEok(base.salePrice)}</strong><small>{BASIS_LABEL[priceData.priceBasis]}</small></div>
+          <div><span>판매 기준가 ({BASIS_LABEL[priceData.priceBasis]})</span><strong>{formatOptionalEok(base.salePrice)}</strong></div>
           <div><span>실수령 메소</span><strong>{formatOptionalEok(base.netMeso)}</strong></div>
-          <div><span>1억당 현금</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{base.salePrice > 0 ? `직구 대비 ${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}%` : "가격 입력 필요"}</small></div>
+          <div><span>1억당 현금 ({base.salePrice > 0 ? `직구 대비 ${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}%` : "가격 입력 필요"})</span><strong>{formatWon(base.primaryPerEok)}</strong></div>
         </div>
       )}
 

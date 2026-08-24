@@ -1241,10 +1241,9 @@ footer > small,
   border-radius: 10px;
   background: #e5ddd5;
 }
-.accordion-result-strip > div { min-width: 0; padding: 11px 13px; background: #fff; }
-.accordion-result-strip span,
-.accordion-result-strip small { display: block; color: var(--muted); font-size: 13px; }
-.accordion-result-strip strong { display: block; margin-top: 5px; color: #4a3b31; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.accordion-result-strip > div { min-width: 0; padding: 9px 11px; background: #fff; }
+.accordion-result-strip span { display: block; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.accordion-result-strip strong { display: block; margin-top: 4px; color: #4a3b31; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .accordion-price-editor {
   margin-top: 16px;
   padding: 16px;
@@ -1349,19 +1348,25 @@ footer > small,
 .product-card-summary dd { margin: 3px 0 0; color: #55443a; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
 .mobile-accordion-panel { padding: 16px; border-top: 1px solid #e5ddd5; }
 
+@media (min-width: 1500px) {
+  .accordion-component-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 @media (max-width: 1199px) {
   .product-card-list { align-items: start; }
+  .product-card-list .product-accordion-card.expanded { grid-column: 1 / -1; }
   .accordion-detail-topline,
   .accordion-meta-actions { align-items: stretch; flex-direction: column; }
   .accordion-basis-select { min-width: 0; }
   .accordion-result-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .accordion-component-grid { grid-template-columns: 1fr; }
+  .accordion-component-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .accordion-actions { justify-content: stretch; }
   .accordion-actions button { flex: 1 1 150px; }
   .accordion-sale-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 767px) {
+  .product-card-list .product-accordion-card.expanded { grid-column: auto; }
   .product-card-toggle { gap: 7px; padding: 10px 13px 6px; }
   .card-product-identity { gap: 7px; }
   .card-product-name > strong { font-size: 15px; }
@@ -1383,6 +1388,7 @@ footer > small,
   .accordion-sale-grid input { height: 34px; padding: 5px 7px; font-size: 16px; }
   .accordion-result-strip { grid-template-columns: 1fr 1fr; }
   .accordion-price-editor { padding: 13px; }
+  .accordion-component-grid { grid-template-columns: 1fr; }
   .accordion-component-card { padding: 11px; }
   .accordion-actions { flex-direction: column; }
   .accordion-actions button { width: 100%; flex-basis: auto; }
