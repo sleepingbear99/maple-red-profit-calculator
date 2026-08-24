@@ -831,49 +831,21 @@ footer > small,
 /* Component-level market prices for packages and single-item products. */
 .editor-modal { width: min(1080px, 100%); }
 .editor-grid > .full { grid-column: 1 / -1; }
-.component-price-editor,
 .component-detail {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: #fcfbf9;
 }
-.component-price-editor { padding: 18px; }
-.component-editor-heading,
 .component-detail-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
 }
-.component-editor-heading > div { display: flex; flex-direction: column; gap: 4px; }
-.component-editor-heading strong,
 .component-detail-heading strong,
 .excluded-components strong { color: var(--ink); font-size: 15px; font-weight: 600; }
-.component-editor-heading small,
-.component-editor-heading > span,
 .component-detail-heading > span,
 .excluded-components span { color: var(--muted); font-size: 14px; line-height: 1.55; }
-.component-price-head,
-.component-price-row {
-  display: grid;
-  grid-template-columns: minmax(210px, 1.45fr) repeat(3, minmax(150px, 1fr));
-  gap: 10px;
-  align-items: center;
-}
-.component-price-head {
-  margin-top: 16px;
-  padding: 10px 12px;
-  border-radius: 9px;
-  color: var(--muted);
-  background: #f5f0eb;
-  font-size: 14px;
-  font-weight: 600;
-}
-.component-price-head span:not(:first-child) { text-align: right; }
-.component-price-row { padding: 10px 0; border-bottom: 1px solid #eee8e2; }
-.component-price-row:last-of-type { border-bottom: 0; }
-.component-name { color: var(--ink); font-size: 15px; font-weight: 500; line-height: 1.45; }
-.component-price-row .affix-input input { padding-left: 10px; text-align: right; }
 .excluded-components {
   display: flex;
   gap: 12px;
@@ -898,11 +870,7 @@ footer > small,
 
 @media (max-width: 760px) {
   .editor-grid > .full { grid-column: auto; }
-  .component-editor-heading,
   .component-detail-heading { flex-direction: column; gap: 5px; }
-  .component-price-head { display: none; }
-  .component-price-row { grid-template-columns: 1fr; gap: 8px; padding: 15px 0; }
-  .component-name { margin-bottom: 2px; }
   .excluded-components { flex-direction: column; gap: 4px; }
 }
 
@@ -1224,8 +1192,8 @@ footer > small,
   font-weight: 600;
 }
 .accordion-sale-editor {
-  margin-top: 16px;
-  padding: 15px 16px;
+  margin-top: 12px;
+  padding: 11px 12px;
   border: 1px solid #e3dcd4;
   border-radius: 12px;
   background: #fdfbf8;
@@ -1236,36 +1204,33 @@ footer > small,
   justify-content: space-between;
   gap: 16px;
 }
-.accordion-sale-heading > div { display: grid; gap: 3px; }
 .accordion-sale-heading strong { font-size: 16px; font-weight: 700; }
-.accordion-sale-heading small,
-.accordion-sale-editor > p { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .effective-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.effective-status .sale-state { min-height: 22px; padding: 3px 7px; font-size: 13px; }
 .accordion-sale-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 13px;
+  gap: 8px;
+  margin-top: 9px;
 }
-.accordion-sale-grid label { display: grid; min-width: 0; gap: 5px; }
+.accordion-sale-grid label { display: grid; min-width: 0; gap: 3px; }
 .accordion-sale-grid label > span { color: var(--muted); font-size: 13px; font-weight: 600; }
 .accordion-sale-grid select,
 .accordion-sale-grid input {
   min-width: 0;
   width: 100%;
-  height: 42px;
-  padding: 9px 11px;
+  height: 36px;
+  padding: 6px 9px;
   border: 1px solid #ded8d1;
   border-radius: 9px;
   color: var(--ink);
   background: #fff;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .accordion-sale-grid select:focus,
 .accordion-sale-grid input:focus { border-color: #806753; outline: 2px solid rgba(128, 103, 83, .12); }
-.accordion-sale-editor > p { margin: 10px 0 0; }
 .accordion-result-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1280,9 +1245,6 @@ footer > small,
 .accordion-result-strip span,
 .accordion-result-strip small { display: block; color: var(--muted); font-size: 13px; }
 .accordion-result-strip strong { display: block; margin-top: 5px; color: #4a3b31; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
-.accordion-result-strip .mileage-summary { background: #faf3e8; }
-.accordion-result-strip .mileage-summary strong { color: #8c6a46; }
-.accordion-result-strip .mileage-summary small { margin-top: 3px; }
 .accordion-price-editor {
   margin-top: 16px;
   padding: 16px;
@@ -1293,7 +1255,7 @@ footer > small,
 .accordion-component-head,
 .accordion-component-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.4fr) repeat(3, minmax(130px, 1fr));
+  grid-template-columns: minmax(210px, 1.4fr) repeat(2, minmax(130px, 1fr));
   gap: 10px;
   align-items: center;
 }
@@ -1387,7 +1349,7 @@ footer > small,
   .accordion-basis-select { min-width: 0; }
   .accordion-result-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .accordion-component-head { display: none; }
-  .accordion-component-row { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 13px 0; }
+  .accordion-component-row { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 13px 0; }
   .accordion-component-name { grid-column: 1 / -1; }
   .accordion-component-row > label > span:first-child { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
   .accordion-actions { justify-content: stretch; }
@@ -1408,15 +1370,17 @@ footer > small,
   .product-card-summary > div { padding-top: 6px; }
   .mobile-accordion-panel { padding: 14px 13px; }
   .accordion-detail-topline,
-  .accordion-price-heading,
-  .accordion-sale-heading { align-items: stretch; flex-direction: column; gap: 9px; }
-  .effective-status { white-space: normal; }
-  .accordion-sale-editor { padding: 13px; }
-  .accordion-sale-grid { grid-template-columns: 1fr; }
+  .accordion-price-heading { align-items: stretch; flex-direction: column; gap: 9px; }
+  .accordion-sale-heading { gap: 8px; }
+  .effective-status { flex: 0 0 auto; white-space: nowrap; }
+  .accordion-sale-editor { padding: 10px; }
+  .accordion-sale-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .accordion-sale-grid select,
+  .accordion-sale-grid input { height: 34px; padding: 5px 7px; font-size: 16px; }
   .accordion-result-strip { grid-template-columns: 1fr 1fr; }
   .accordion-price-editor { padding: 13px; }
-  .accordion-component-row { grid-template-columns: 1fr; gap: 9px; }
-  .accordion-component-name { grid-column: auto; }
+  .accordion-component-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .accordion-component-name { grid-column: 1 / -1; }
   .accordion-component-row .affix-input { display: block; width: 100%; }
   .accordion-actions { flex-direction: column; }
   .accordion-actions button { width: 100%; flex-basis: auto; }

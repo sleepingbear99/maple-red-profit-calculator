@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ALL_CATALOG_PRODUCTS,
   CATEGORY_LABELS,
@@ -14,7 +14,7 @@ import {
   type ProductSubcategory,
 } from "./product-data";
 
-type PriceBasis = "current" | "recent" | "direct";
+type PriceBasis = "current" | "recent";
 type CategoryFilter = "all" | ProductCategory;
 type MileageFilter = "all" | "eligible" | "ineligible";
 type ProfitFilter = "all" | "good" | "bad";
@@ -33,7 +33,6 @@ type Settings = {
 type ComponentMarketPrice = {
   currentMarketPrice: number | null;
   recentTradePrice: number | null;
-  manuallyConfirmedPrice: number | null;
 };
 
 type ProductPriceData = {
@@ -56,7 +55,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 4;
+const STORAGE_VERSION = 5;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -156,7 +155,6 @@ function migrateCatalogProducts(_version: unknown, savedProducts: unknown): Cata
 const BASIS_LABEL: Record<PriceBasis, string> = {
   current: "현재 최저가",
   recent: "최근 체결가",
-  direct: "직접 확인가",
 };
 
 const CATEGORY_FILTER_OPTIONS: [CategoryFilter, string][] = [
@@ -238,7 +236,6 @@ function emptyComponentMarketPrice(): ComponentMarketPrice {
   return {
     currentMarketPrice: null,
     recentTradePrice: null,
-    manuallyConfirmedPrice: null,
   };
 }
 
@@ -264,17 +261,26 @@ function normalizeNullableNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function normalizeProductPrice(product: CatalogProduct, saved?: Partial<ProductPriceData>): ProductPriceData {
+type SavedComponentMarketPrice = Partial<ComponentMarketPrice> & { manuallyConfirmedPrice?: unknown };
+type SavedProductPriceData = {
+  priceBasis?: unknown;
+  componentPrices?: Record<string, SavedComponentMarketPrice>;
+  saleLimit?: unknown;
+  note?: unknown;
+  updatedAt?: unknown;
+};
+
+function normalizeProductPrice(product: CatalogProduct, saved?: SavedProductPriceData): ProductPriceData {
   const componentPrices = Object.fromEntries(product.components.map((component) => {
     const price = saved?.componentPrices?.[component.id];
+    const currentMarketPrice = normalizeNullableNumber(price?.currentMarketPrice);
     return [component.id, {
-      currentMarketPrice: normalizeNullableNumber(price?.currentMarketPrice),
+      currentMarketPrice: currentMarketPrice ?? normalizeNullableNumber(price?.manuallyConfirmedPrice),
       recentTradePrice: normalizeNullableNumber(price?.recentTradePrice),
-      manuallyConfirmedPrice: normalizeNullableNumber(price?.manuallyConfirmedPrice),
     }];
   }));
   return {
-    priceBasis: saved?.priceBasis === "recent" || saved?.priceBasis === "direct" ? saved.priceBasis : "current",
+    priceBasis: saved?.priceBasis === "recent" ? "recent" : "current",
     componentPrices,
     saleLimit: normalizeNullableNumber(saved?.saleLimit),
     note: typeof saved?.note === "string" ? saved.note : "",
@@ -295,13 +301,12 @@ function migrateLegacyPriceData(products: CatalogProduct[], legacyProducts: unkn
     const record = legacy as Record<string, unknown>;
     const component = item.components[0];
     migrated[item.id] = {
-      priceBasis: record.priceBasis === "recent" || record.priceBasis === "direct" ? record.priceBasis : "current",
+      priceBasis: record.priceBasis === "recent" ? "recent" : "current",
       componentPrices: {
         ...migrated[item.id].componentPrices,
         [component.id]: {
-          currentMarketPrice: normalizeNullableNumber(record.currentPrice),
+          currentMarketPrice: normalizeNullableNumber(record.currentPrice) ?? normalizeNullableNumber(record.directPrice),
           recentTradePrice: normalizeNullableNumber(record.recentPrice),
-          manuallyConfirmedPrice: normalizeNullableNumber(record.directPrice),
         },
       },
       saleLimit: normalizeNullableNumber(record.saleLimit),
@@ -314,7 +319,6 @@ function migrateLegacyPriceData(products: CatalogProduct[], legacyProducts: unkn
 
 function componentPriceForBasis(price: ComponentMarketPrice, basis: PriceBasis) {
   if (basis === "recent") return price.recentTradePrice ?? 0;
-  if (basis === "direct") return price.manuallyConfirmedPrice ?? 0;
   return price.currentMarketPrice ?? 0;
 }
 
@@ -676,19 +680,6 @@ export default function Home() {
     });
   };
 
-  const updateEditorComponentPrice = (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => {
-    setEditor((current) => current ? {
-      ...current,
-      componentPrices: {
-        ...current.componentPrices,
-        [componentId]: {
-          ...(current.componentPrices[componentId] ?? emptyComponentMarketPrice()),
-          [key]: value,
-        },
-      },
-    } : current);
-  };
-
   const saveProduct = () => {
     if (!editor || !editor.name.trim() || editor.cashPrice <= 0) {
       setNotice("상품명과 캐시 가격을 확인해 주세요.");
@@ -1021,7 +1012,6 @@ export default function Home() {
                                 onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
                                 onProductChange={(changes) => updateProduct(product.id, changes)}
                                 onDetail={() => setDetailId(product.id)}
-                                onEdit={() => setEditor({ ...product, ...productPrice })}
                               />
                             </div>
                           </td>
@@ -1046,7 +1036,6 @@ export default function Home() {
               expanded={expandedProductId === product.id}
               onToggle={() => toggleProduct(product.id)}
               onDetail={() => setDetailId(product.id)}
-              onEdit={() => setEditor({ ...product, ...getProductPrice(priceData, product) })}
               onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
               onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
               onProductChange={(changes) => updateProduct(product.id, changes)}
@@ -1165,14 +1154,14 @@ export default function Home() {
             <button className="modal-close" type="button" aria-label="편집 닫기" onClick={() => setEditor(null)}>×</button>
             <span className="eyebrow">PRODUCT DATA</span>
             <h2 id="editor-title">{editor.isNew ? "새 상품 추가" : "상품 정보 수정"}</h2>
-            <p className="modal-lead">가격은 억 메소 단위로 입력합니다. 변경 내용은 이 기기에 자동 저장됩니다.</p>
+            <p className="modal-lead">상품 정보와 판매 설정을 수정합니다. 변경 내용은 이 기기에 자동 저장됩니다.</p>
             <div className="editor-grid">
               <label className="full"><span>상품명</span><input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="예: 플래티넘 카르마의 가위" autoFocus /></label>
               <label><span>카테고리</span><select value={editor.category} onChange={(event) => { const category = event.target.value as ProductCategory; setEditor({ ...editor, category, subcategory: SUBCATEGORY_OPTIONS[category][0] }); }}>{(Object.entries(CATEGORY_LABELS) as [ProductCategory, string][]).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
               <label><span>세부 분류</span><select value={editor.subcategory ?? SUBCATEGORY_OPTIONS[editor.category][0]} onChange={(event) => setEditor({ ...editor, subcategory: event.target.value as ProductSubcategory })}>{SUBCATEGORY_OPTIONS[editor.category].map((key) => <option key={key} value={key}>{SUBCATEGORY_LABELS[key]}</option>)}</select></label>
               <label><span>캐시 가격</span><span className="affix-input"><input type="number" min="0" value={editor.cashPrice} onChange={(event) => setEditor({ ...editor, cashPrice: safeNumber(event.target.value) })} /><small>캐시</small></span></label>
               <label><span>판매 스냅샷 확인일</span><input type="date" value={editor.checkedAt} onChange={(event) => setEditor({ ...editor, checkedAt: event.target.value })} /></label>
-              <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option><option value="direct">직접 확인가</option></select></label>
+              <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option></select></label>
               <label><span>예상 판매 가능 수량</span><span className="affix-input"><input type="number" min="0" value={editor.saleLimit ?? ""} placeholder="미설정" onChange={(event) => setEditor({ ...editor, saleLimit: optionalNumber(event.target.value) })} /><small>개</small></span></label>
               <label><span>마지막 가격 확인</span><input type="datetime-local" value={editor.updatedAt.slice(0, 16)} onChange={(event) => setEditor({ ...editor, updatedAt: event.target.value })} /></label>
               <label className="editor-check"><input type="checkbox" checked={editor.mileage30Eligible} onChange={(event) => setEditor({ ...editor, mileage30Eligible: event.target.checked })} /><span><b>마일리지 30% 사용 가능</b><small>미적용·적용 효율을 함께 계산합니다.</small></span></label>
@@ -1180,25 +1169,6 @@ export default function Home() {
               <label><span>상태 적용 방식</span><select value={editor.statusSource} onChange={(event) => setEditor({ ...editor, statusSource: event.target.value as ProductStatusSource })}><option value="manual">직접 지정</option><option value="automatic">판매 기간으로 자동</option></select></label>
               <label><span>판매 시작일</span><input type="date" value={editor.saleStartAt ?? ""} onChange={(event) => setEditor({ ...editor, saleStartAt: event.target.value || undefined })} /></label>
               <label><span>판매 종료일</span><input type="date" value={editor.saleEndAt ?? ""} onChange={(event) => setEditor({ ...editor, saleEndAt: event.target.value || undefined })} /></label>
-              <section className="component-price-editor full">
-                <div className="component-editor-heading">
-                  <div><strong>판매가 합산 구성품</strong><small>구성품별 경매장 가격을 억 메소 단위로 입력합니다.</small></div>
-                  <span>전체 {totalQuantity(editor) + excludedQuantity(editor)}개 · 합산 {totalQuantity(editor)}개{excludedQuantity(editor) > 0 ? ` · 계산 제외 ${excludedQuantity(editor)}개` : ""}</span>
-                </div>
-                <div className="component-price-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span><span>직접 확인가</span></div>
-                {editor.components.map((component) => {
-                  const componentPrice = editor.componentPrices[component.id] ?? emptyComponentMarketPrice();
-                  return (
-                    <div className="component-price-row" key={component.id}>
-                      <span className="component-name">{component.name || editor.name || "상품명과 동일"}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span>
-                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 현재 최저가`} onChange={(event) => updateEditorComponentPrice(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span>
-                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 최근 체결가`} onChange={(event) => updateEditorComponentPrice(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span>
-                      <span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.manuallyConfirmedPrice ?? ""} placeholder="비어 있음" aria-label={`${component.name || editor.name} 직접 확인가`} onChange={(event) => updateEditorComponentPrice(component.id, "manuallyConfirmedPrice", optionalNumber(event.target.value))} /><small>억</small></span>
-                    </div>
-                  );
-                })}
-                {editor.excludedComponents.length > 0 && <div className="excluded-components"><strong>계산 제외 구성품</strong><span>{editor.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
-              </section>
               <label className="full"><span>메모</span><textarea value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} placeholder="판매 속도, 시세 특이사항 등을 기록하세요." /></label>
             </div>
             <div className="modal-actions">
@@ -1222,7 +1192,6 @@ function ProductCard({
   expanded,
   onToggle,
   onDetail,
-  onEdit,
   onPriceBasisChange,
   onComponentPriceChange,
   onProductChange,
@@ -1234,7 +1203,6 @@ function ProductCard({
   expanded: boolean;
   onToggle: () => void;
   onDetail: () => void;
-  onEdit: () => void;
   onPriceBasisChange: (basis: PriceBasis) => void;
   onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
   onProductChange: (changes: Partial<CatalogProduct>) => void;
@@ -1281,7 +1249,6 @@ function ProductCard({
             onComponentPriceChange={onComponentPriceChange}
             onProductChange={onProductChange}
             onDetail={onDetail}
-            onEdit={onEdit}
           />
         </div>
       )}
@@ -1297,7 +1264,6 @@ function ProductAccordionDetails({
   onComponentPriceChange,
   onProductChange,
   onDetail,
-  onEdit,
 }: {
   product: CatalogProduct;
   priceData: ProductPriceData;
@@ -1306,19 +1272,20 @@ function ProductAccordionDetails({
   onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
   onProductChange: (changes: Partial<CatalogProduct>) => void;
   onDetail: () => void;
-  onEdit: () => void;
 }) {
   const base = calculate(product, priceData, settings);
   const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
   const isReference = product.category === "reference";
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
+  const [showPriceEditor, setShowPriceEditor] = useState(false);
+  const priceEditorId = useId();
 
   return (
     <div className="accordion-detail-content">
       <div className="accordion-detail-topline">
         <div>
-          <strong>상품 상세 및 가격 입력</strong>
+          <strong>상품 상세</strong>
           <span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span>
         </div>
         {!isReference && (
@@ -1327,16 +1294,24 @@ function ProductAccordionDetails({
             <select value={priceData.priceBasis} onChange={(event) => onPriceBasisChange(event.target.value as PriceBasis)}>
               <option value="current">현재 최저가</option>
               <option value="recent">최근 체결가</option>
-              <option value="direct">직접 확인가</option>
             </select>
           </label>
         )}
       </div>
 
+      {!isReference && (
+        <div className="accordion-result-strip">
+          <div><span>캐시 가격</span><strong>{formatNumber(product.cashPrice)}캐시</strong></div>
+          <div><span>판매 기준가</span><strong>{formatOptionalEok(base.salePrice)}</strong><small>{BASIS_LABEL[priceData.priceBasis]}</small></div>
+          <div><span>실수령 메소</span><strong>{formatOptionalEok(base.netMeso)}</strong></div>
+          <div><span>1억당 현금</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{base.salePrice > 0 ? `직구 대비 ${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}%` : "가격 입력 필요"}</small></div>
+        </div>
+      )}
+
       <section className="accordion-sale-editor" aria-label={`${product.name} 판매 상태 편집`}>
         <div className="accordion-sale-heading">
-          <div><strong>판매 상태</strong><small>상태와 판매 기간은 변경 즉시 이 기기에 저장됩니다.</small></div>
-          <span className="effective-status">현재 적용 <ProductStatusBadge product={product} showActive /></span>
+          <strong>판매 상태</strong>
+          <span className="effective-status">현재 적용: <ProductStatusBadge product={product} showActive /></span>
         </div>
         <div className="accordion-sale-grid">
           <label>
@@ -1361,27 +1336,19 @@ function ProductAccordionDetails({
             <input type="date" value={product.saleEndAt ?? ""} min={product.saleStartAt} onChange={(event) => onProductChange({ saleEndAt: event.target.value || undefined })} />
           </label>
         </div>
-        <p>{product.statusSource === "automatic" ? "판매 시작 전에는 판매 예정, 판매 기간에는 판매 중, 종료 후에는 판매 종료로 표시합니다." : "직접 지정한 상태는 판매 기간보다 우선합니다."}</p>
       </section>
 
-      {!isReference && (
-        <div className="accordion-result-strip">
-          <div><span>선택 기준 합산가</span><strong>{formatOptionalEok(base.salePrice)}</strong></div>
-          <div><span>실수령 메소</span><strong>{formatOptionalEok(base.netMeso)}</strong></div>
-          {settings.showMileage && mileage && <div className="mileage-summary"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일 필요</small></div>}
-          <div><span>마지막 가격 확인</span><strong>{formatDate(priceData.updatedAt)}</strong></div>
-        </div>
+      {isReference && (
+        <div className="reference-detail-note compact"><strong>마일리지 참고 품목</strong><p>일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
       )}
 
-      {isReference ? (
-        <div className="reference-detail-note compact"><strong>마일리지 참고 품목</strong><p>일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
-      ) : (
-        <section className="accordion-price-editor" aria-label={`${product.name} 구성품별 가격 입력`}>
+      {!isReference && showPriceEditor && (
+        <section className="accordion-price-editor" id={priceEditorId} aria-label={`${product.name} 구성품별 가격 입력`}>
           <div className="accordion-price-heading">
-            <div><strong>구성품별 경매장 가격</strong><small>억 메소 단위로 입력하면 즉시 합산되고 이 기기에 자동 저장됩니다.</small></div>
+            <div><strong>구성품별 경매장 가격</strong><small>현재 최저가와 최근 체결가를 억 메소 단위로 입력합니다.</small></div>
             <span>선택 기준 · {BASIS_LABEL[priceData.priceBasis]}</span>
           </div>
-          <div className="accordion-component-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span><span>직접 확인가</span></div>
+          <div className="accordion-component-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span></div>
           {product.components.map((component) => {
             const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
             const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
@@ -1391,9 +1358,8 @@ function ProductAccordionDetails({
                   <strong>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</strong>
                   <small>선택 기준 {formatOptionalEok(selectedComponentPrice)}</small>
                 </div>
-                <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
-                <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
-                <label><span>직접 확인가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.manuallyConfirmedPrice ?? ""} placeholder="—" onChange={(event) => onComponentPriceChange(component.id, "manuallyConfirmedPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="—" aria-label={`${component.name} 현재 최저가`} onChange={(event) => onComponentPriceChange(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="—" aria-label={`${component.name} 최근 체결가`} onChange={(event) => onComponentPriceChange(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
               </div>
             );
           })}
@@ -1404,12 +1370,14 @@ function ProductAccordionDetails({
       <div className="accordion-meta-actions">
         <div className="accordion-meta">
           <span>판매 스냅샷 {product.checkedAt}</span>
+          {!isReference && <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>}
           {!isReference && <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>}
+          {settings.showMileage && mileage && <span>마일30 {formatWon(mileage.primaryPerEok)} · {formatNumber(mileage.mileageUsed)} 마일 필요</span>}
           {priceData.note && <span>메모 · {priceData.note}</span>}
         </div>
         <div className="accordion-actions">
           <button className="secondary-button" type="button" onClick={onDetail}>상세 계산 보기</button>
-          {!isReference && <button className="primary-button" type="button" onClick={onEdit}>상품·가격 전체 편집</button>}
+          {!isReference && <button className="primary-button" type="button" aria-expanded={showPriceEditor} aria-controls={priceEditorId} onClick={() => setShowPriceEditor((current) => !current)}>{showPriceEditor ? "상품가격 편집 닫기" : "상품가격 전체 편집"}</button>}
         </div>
       </div>
     </div>
