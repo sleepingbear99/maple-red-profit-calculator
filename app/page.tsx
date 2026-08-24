@@ -1348,12 +1348,12 @@ function ProductAccordionDetails({
             <div><strong>구성품별 경매장 가격</strong><small>현재 최저가와 최근 체결가를 억 메소 단위로 입력합니다.</small></div>
             <span>선택 기준 · {BASIS_LABEL[priceData.priceBasis]}</span>
           </div>
-          <div className="accordion-component-grid">
+          <div className="component-price-grid">
             {product.components.map((component) => {
               const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
               const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
               return (
-                <div className="accordion-component-card" key={component.id}>
+                <div className="component-price-card" key={component.id}>
                   <div className="accordion-component-name">
                     <strong>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</strong>
                     <small>· 기준 {formatOptionalEok(selectedComponentPrice)}</small>

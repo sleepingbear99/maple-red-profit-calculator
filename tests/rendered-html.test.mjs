@@ -60,3 +60,23 @@ test("keeps finished source free of starter preview scaffolding", async () => {
 
   await assert.rejects(access(new URL("public/_sites-preview", templateRoot)));
 });
+
+test("separates the ranking list from the component price grid", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const tabletStart = css.lastIndexOf("@media (max-width: 1199px)");
+  const mobileStart = css.lastIndexOf("@media (max-width: 767px)");
+  const narrowMobileStart = css.lastIndexOf("@media (max-width: 420px)");
+  const tabletStyles = css.slice(tabletStart, mobileStart);
+  const mobileStyles = css.slice(mobileStart, narrowMobileStart);
+
+  assert.match(page, /className="product-card-list"/);
+  assert.match(page, /className="component-price-grid"/);
+  assert.match(css, /\.product-card-list\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.doesNotMatch(css, /\.product-card-list\s*\{[^}]*repeat\((?:2|3),/s);
+  assert.match(css, /\.component-price-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(tabletStyles, /\.component-price-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(mobileStyles, /\.component-price-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+});
