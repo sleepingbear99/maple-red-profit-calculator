@@ -1348,21 +1348,24 @@ function ProductAccordionDetails({
             <div><strong>구성품별 경매장 가격</strong><small>현재 최저가와 최근 체결가를 억 메소 단위로 입력합니다.</small></div>
             <span>선택 기준 · {BASIS_LABEL[priceData.priceBasis]}</span>
           </div>
-          <div className="accordion-component-head" aria-hidden="true"><span>구성품</span><span>현재 최저가</span><span>최근 체결가</span></div>
-          {product.components.map((component) => {
-            const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
-            const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
-            return (
-              <div className="accordion-component-row" key={component.id}>
-                <div className="accordion-component-name">
-                  <strong>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</strong>
-                  <small>선택 기준 {formatOptionalEok(selectedComponentPrice)}</small>
+          <div className="accordion-component-grid">
+            {product.components.map((component) => {
+              const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
+              const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
+              return (
+                <div className="accordion-component-card" key={component.id}>
+                  <div className="accordion-component-name">
+                    <strong>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</strong>
+                    <small>· 기준 {formatOptionalEok(selectedComponentPrice)}</small>
+                  </div>
+                  <div className="accordion-component-inputs">
+                    <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="—" aria-label={`${component.name} 현재 최저가`} onChange={(event) => onComponentPriceChange(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                    <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="—" aria-label={`${component.name} 최근 체결가`} onChange={(event) => onComponentPriceChange(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
+                  </div>
                 </div>
-                <label><span>현재 최저가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.currentMarketPrice ?? ""} placeholder="—" aria-label={`${component.name} 현재 최저가`} onChange={(event) => onComponentPriceChange(component.id, "currentMarketPrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
-                <label><span>최근 체결가</span><span className="affix-input"><input type="number" min="0" step="0.01" value={componentPrice.recentTradePrice ?? ""} placeholder="—" aria-label={`${component.name} 최근 체결가`} onChange={(event) => onComponentPriceChange(component.id, "recentTradePrice", optionalNumber(event.target.value))} /><small>억</small></span></label>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
           {excludedCount > 0 && <div className="excluded-components"><strong>계산 제외 구성품</strong><span>{product.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
         </section>
       )}
