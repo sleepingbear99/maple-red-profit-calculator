@@ -1453,6 +1453,7 @@ footer > small,
   }
   .accordion-detail-topline,
   .accordion-meta-actions { align-items: stretch; flex-direction: column; }
+  .accordion-meta { flex: 0 0 auto; }
   .accordion-basis-select { min-width: 0; }
   .accordion-result-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .component-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

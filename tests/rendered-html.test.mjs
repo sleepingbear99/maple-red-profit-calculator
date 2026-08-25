@@ -93,4 +93,5 @@ test("separates the ranking list from the component price grid", async () => {
   assert.doesNotMatch(page, /현재 적용:/);
   assert.match(css, /\.accordion-actions \.primary-button\s*\{[^}]*background:\s*#806753;/s);
   assert.match(css, /\.accordion-actions \.secondary-button\s*\{[^}]*background:\s*#fffdf9;/s);
+  assert.match(tabletStyles, /\.accordion-meta\s*\{[^}]*flex:\s*0 0 auto;/s);
 });
