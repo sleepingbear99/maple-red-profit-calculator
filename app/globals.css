@@ -923,7 +923,6 @@ footer > small,
 .category-coupon { color: #a15c5c; background: #f8eded; }
 .category-job { color: #66758c; background: #edf0f5; }
 .category-boss { color: #8c6a46; background: #f5ead4; }
-.category-reference { color: #7e746c; background: #eceae4; }
 .subcategory-badge { border: 1px solid #e3ded5; color: #7e746c; background: #fff; }
 
 .desktop-product-table { display: block; overflow: visible; }
@@ -1049,9 +1048,6 @@ footer > small,
 .product-card-actions .secondary-button { width: auto; padding: 9px 11px; }
 .muted-card { opacity: .64; }
 .product-list-footnote { display: flex; justify-content: space-between; gap: 18px; margin-top: 10px; padding: 12px 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
-.reference-detail-note { margin-top: 20px; padding: 16px; border: 1px solid #ded8d1; border-radius: 12px; background: #f5f1ed; }
-.reference-detail-note strong { font-size: 16px; }
-.reference-detail-note p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
 @media (max-width: 1199px) {
   .products-section .section-heading.outside { align-items: flex-start; flex-wrap: wrap; }
@@ -1339,8 +1335,6 @@ footer > small,
 .accordion-actions .secondary-button:hover { border-color: #d9c5ad; color: #604b39; background: #f1e5d6; }
 .accordion-actions .primary-button:focus-visible,
 .accordion-actions .secondary-button:focus-visible { outline: 2px solid #9a7448; outline-offset: 2px; }
-.reference-detail-note.compact { margin-top: 16px; }
-
 .product-accordion-card {
   padding: 0;
   overflow: hidden;
@@ -1349,6 +1343,9 @@ footer > small,
   transition: border-color .16s ease, box-shadow .16s ease;
 }
 .product-accordion-card.expanded { border-color: #d6c7b9; box-shadow: 0 8px 22px rgba(85, 68, 58, .07); }
+.product-accordion-card.ended { border-color: #e5ddd6; background: #fbf9f6; }
+.product-accordion-card.ended .card-product-name > strong { color: #766c64; }
+.product-accordion-card.ended .card-rank { color: #9a9088; }
 .desktop-product-table { display: none; }
 .product-card-list {
   display: grid;
@@ -1359,7 +1356,7 @@ footer > small,
   display: grid;
   width: 100%;
   min-height: 76px;
-  grid-template-columns: 44px minmax(260px, 1fr) 90px 110px 110px 180px 28px;
+  grid-template-columns: 44px minmax(260px, 1fr) 90px 110px 110px 235px 28px;
   grid-template-areas: "rank identity cash sale net efficiency chevron";
   gap: 10px;
   align-items: center;
@@ -1466,6 +1463,20 @@ footer > small,
 .card-efficiency-value > em.positive { color: #9a7448; }
 .card-efficiency-value > em.negative { color: #a15c5c; }
 .card-efficiency-value > em.neutral { color: #7e746c; }
+.card-mileage-comparison {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: #8c6a46;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.2;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.card-mileage-comparison b { font-weight: 700; }
+.card-mileage-comparison > span { font-size: 12px; font-weight: 700; }
+.card-mileage-comparison > small { color: #8b8178; font-size: 10px; font-weight: 500; }
 .product-card-toggle > .chevron { grid-area: chevron; color: #765e4b; text-align: center; }
 .mobile-accordion-panel { padding: 16px; border-top: 1px solid #e5ddd5; }
 
@@ -1515,6 +1526,9 @@ footer > small,
   .card-efficiency-value { gap: 2px 4px; }
   .card-efficiency-value > strong { font-size: 15px; }
   .card-efficiency-value > em { font-size: 10px; }
+  .card-mileage-comparison { font-size: 10px; }
+  .card-mileage-comparison > span { font-size: 11px; }
+  .card-mileage-comparison > small { font-size: 9px; }
   .mobile-accordion-panel { padding: 14px 13px; }
   .accordion-detail-topline,
   .accordion-price-heading { align-items: stretch; flex-direction: column; gap: 9px; }

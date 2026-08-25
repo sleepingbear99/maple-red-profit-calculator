@@ -2,8 +2,8 @@
 
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
-  ALL_CATALOG_PRODUCTS,
   CATEGORY_LABELS,
+  CURRENT_PRODUCTS,
   INITIAL_DATA_COUNTS,
   SUBCATEGORY_LABELS,
   SUBCATEGORY_OPTIONS,
@@ -55,7 +55,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 5;
+const STORAGE_VERSION = 6;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -68,7 +68,20 @@ const DEFAULT_SETTINGS: Settings = {
   showMileage: true,
 };
 
-const DEFAULT_PRODUCTS = ALL_CATALOG_PRODUCTS;
+const DEFAULT_PRODUCTS = CURRENT_PRODUCTS;
+
+const RENAMED_BUILT_IN_COMPONENT_IDS = new Set([
+  "resistance-03-component-1",
+  "resistance-04-component-1",
+  "resistance-09-component-4",
+  "resistance-10-component-4",
+  "boss-22-component-1",
+]);
+
+const REQUIRED_BUILT_IN_EXCLUDED_COMPONENT_IDS = new Set([
+  "adventurer-15-excluded-component-1",
+  "adventurer-16-excluded-component-1",
+]);
 
 const PRODUCT_STATUS_OPTIONS: [ProductStatus, string][] = [
   ["active", "판매 중"],
@@ -136,6 +149,27 @@ function mergeSavedProduct(item: SavedProductRecord, fallback?: CatalogProduct):
   };
 }
 
+function migrateBuiltInProduct(item: SavedProductRecord, fallback: CatalogProduct): CatalogProduct {
+  const merged = mergeSavedProduct(item, fallback) ?? fallback;
+  const fallbackComponents = new Map(fallback.components.map((component) => [component.id, component]));
+  const components = merged.components.map((component) => {
+    const replacement = fallbackComponents.get(component.id);
+    return RENAMED_BUILT_IN_COMPONENT_IDS.has(component.id) && replacement
+      ? { ...component, name: replacement.name }
+      : component;
+  });
+  const excludedComponents = [...merged.excludedComponents];
+  for (const component of fallback.excludedComponents) {
+    if (
+      REQUIRED_BUILT_IN_EXCLUDED_COMPONENT_IDS.has(component.id) &&
+      !excludedComponents.some((candidate) => candidate.id === component.id)
+    ) {
+      excludedComponents.push(component);
+    }
+  }
+  return { ...merged, components, excludedComponents };
+}
+
 function migrateCatalogProducts(_version: unknown, savedProducts: unknown): CatalogProduct[] {
   if (!Array.isArray(savedProducts)) return DEFAULT_PRODUCTS;
   const savedRecords = savedProducts.filter((value): value is SavedProductRecord => !!value && typeof value === "object");
@@ -143,7 +177,7 @@ function migrateCatalogProducts(_version: unknown, savedProducts: unknown): Cata
   const defaultIds = new Set(DEFAULT_PRODUCTS.map((product) => product.id));
   const builtInProducts = DEFAULT_PRODUCTS.map((fallback) => {
     const saved = savedById.get(fallback.id);
-    return saved ? mergeSavedProduct(saved, fallback) ?? fallback : fallback;
+    return saved ? migrateBuiltInProduct(saved, fallback) : fallback;
   });
   const customProducts = savedRecords
     .filter((item) => typeof item.id === "string" && item.id.startsWith("user-") && !defaultIds.has(item.id))
@@ -165,7 +199,6 @@ const CATEGORY_FILTER_OPTIONS: [CategoryFilter, string][] = [
   ["coupon", "쿠폰"],
   ["job", "직업 코디"],
   ["boss", "보스 코디"],
-  ["reference", "마일리지 참고"],
 ];
 
 function localDateKey(date = new Date()) {
@@ -527,7 +560,6 @@ export default function Home() {
         ].join(" ").toLocaleLowerCase("ko-KR");
         const matchSearch = !normalized || searchableText.includes(normalized);
         if (!matchSearch) return false;
-        if (categoryFilter === "all" && product.category === "reference") return false;
         if (categoryFilter !== "all" && product.category !== categoryFilter) return false;
         if (subcategoryFilter !== "all" && product.subcategory !== subcategoryFilter) return false;
         if (mileageFilter === "eligible" && !product.mileage30Eligible) return false;
@@ -538,6 +570,9 @@ export default function Home() {
         return true;
       })
       .sort((a, b) => {
+        const aEnded = effectiveProductStatus(a) === "ended" ? 1 : 0;
+        const bEnded = effectiveProductStatus(b) === "ended" ? 1 : 0;
+        if (aEnded !== bEnded) return aEnded - bEnded;
         const aPrice = getProductPrice(priceData, a);
         const bPrice = getProductPrice(priceData, b);
         const aBase = calculate(a, aPrice, settings);
@@ -562,7 +597,7 @@ export default function Home() {
 
   const bestProduct = useMemo(() => {
     return products
-      .filter((product) => product.category !== "reference" && isProductActive(product) && selectedPrice(product, getProductPrice(priceData, product)) > 0)
+      .filter((product) => isProductActive(product) && selectedPrice(product, getProductPrice(priceData, product)) > 0)
       .sort((a, b) => calculate(a, getProductPrice(priceData, a), settings).primaryPerEok - calculate(b, getProductPrice(priceData, b), settings).primaryPerEok)[0];
   }, [products, priceData, settings]);
 
@@ -572,7 +607,7 @@ export default function Home() {
     return plan.reduce(
       (totals, item) => {
         const product = products.find((candidate) => candidate.id === item.productId);
-        if (!product || product.category === "reference") return totals;
+        if (!product) return totals;
         const useMileage = item.useMileage && product.mileage30Eligible;
         const result = calculate(product, getProductPrice(priceData, product), settings, useMileage);
         const quantity = Math.max(0, item.quantity);
@@ -710,7 +745,7 @@ export default function Home() {
   };
 
   const addPlanItem = () => {
-    const product = products.find((candidate) => isProductActive(candidate) && candidate.category !== "reference");
+    const product = products.find((candidate) => isProductActive(candidate));
     if (!product) {
       setNotice("먼저 상품을 추가해 주세요.");
       return;
@@ -952,9 +987,9 @@ export default function Home() {
                 {rankedProducts.map((product, index) => {
                   const productPrice = getProductPrice(priceData, product);
                   const base = calculate(product, productPrice, settings);
-                  const isReference = product.category === "reference";
-                  const hasPrice = !isReference && base.salePrice > 0;
-                  const state = hasPrice ? verdict(base.gapPercent) : { text: isReference ? "참고 전용" : "가격 미입력", className: "neutral" };
+                  const hasPrice = base.salePrice > 0;
+                  const isEnded = effectiveProductStatus(product) === "ended";
+                  const state = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
                   const includedCount = totalQuantity(product);
                   const excludedCount = excludedQuantity(product);
                   const isExpanded = expandedProductId === product.id;
@@ -971,7 +1006,7 @@ export default function Home() {
                       >
                         <td>
                           <div className="product-cell">
-                            <span className="rank">{hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
+                            <span className="rank">{!isEnded && hasPrice ? String(index + 1).padStart(2, "0") : "—"}</span>
                             <div>
                               <span className="product-name-line"><strong className="product-name">{product.name}</strong><ProductStatusBadge product={product} /></span>
                               {(includedCount > 1 || excludedCount > 0) && <span className="product-meta">구성 {includedCount + excludedCount}개</span>}
@@ -979,15 +1014,15 @@ export default function Home() {
                           </div>
                         </td>
                         <td><CategoryBadges product={product} /></td>
-                        <td><strong>{isReference ? "—" : formatNumber(product.cashPrice)}</strong><small>{isReference ? "순위 제외" : "캐시"}</small></td>
-                        <td><strong>{formatOptionalEok(base.salePrice)}</strong><small>{isReference ? "참고 전용" : BASIS_LABEL[productPrice.priceBasis]}</small></td>
-                        <td><strong>{formatOptionalEok(base.netMeso)}</strong><small>{isReference ? "—" : `수수료 ${formatNumber(settings.auctionFee, 1)}%`}</small></td>
+                        <td><strong>{formatNumber(product.cashPrice)}</strong><small>캐시</small></td>
+                        <td><strong>{formatOptionalEok(base.salePrice)}</strong><small>{BASIS_LABEL[productPrice.priceBasis]}</small></td>
+                        <td><strong>{formatOptionalEok(base.netMeso)}</strong><small>수수료 {formatNumber(settings.auctionFee, 1)}%</small></td>
                         <td className="efficiency-cell">
                           <strong>{formatWon(base.primaryPerEok)}</strong>
                           <span className={`result-chip ${state.className}`}>{state.text}</span>
                         </td>
                         <td className="summary-status-cell">
-                          {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
+                          {product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
                         </td>
                         <td>
                           <button
@@ -1045,7 +1080,7 @@ export default function Home() {
         {rankedProducts.length === 0 && (
           <div className="empty-state panel"><span>⌕</span><h3>조건에 맞는 상품이 없어요.</h3><p>검색어 또는 필터를 바꿔 보세요.</p></div>
         )}
-        <div className="product-list-footnote panel"><span>2026-08-23 판매 스냅샷 · 경매장 가격은 사용자 입력값만 사용합니다.</span><span>{formatNumber(rankedProducts.length)} / {formatNumber(categoryFilter === "reference" ? INITIAL_DATA_COUNTS.mileageReferences : INITIAL_DATA_COUNTS.currentProducts)}개 표시 중</span></div>
+        <div className="product-list-footnote panel"><span>2026-08-23 판매 스냅샷 · 경매장 가격은 사용자 입력값만 사용합니다.</span><span>{formatNumber(rankedProducts.length)} / {formatNumber(INITIAL_DATA_COUNTS.currentProducts)}개 표시 중</span></div>
       </section>
 
       <section className="planner-section" id="planner">
@@ -1084,7 +1119,7 @@ export default function Home() {
                     <label>
                       <span className="visually-hidden">상품 선택</span>
                       <select value={item.productId} onChange={(event) => updatePlanItem(item.id, { productId: event.target.value, useMileage: false })}>
-                        {products.filter((candidate) => isProductActive(candidate) && candidate.category !== "reference").map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
+                        {products.filter((candidate) => isProductActive(candidate)).map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
                       </select>
                       {product && <small>{formatNumber(product.cashPrice)}캐시 · {productPrice?.saleLimit ? `한도 ${formatNumber(productPrice.saleLimit)}개` : "한도 미설정"}</small>}
                     </label>
@@ -1208,29 +1243,32 @@ function ProductCard({
   onProductChange: (changes: Partial<CatalogProduct>) => void;
 }) {
   const base = calculate(product, priceData, settings);
-  const isReference = product.category === "reference";
-  const hasPrice = !isReference && base.salePrice > 0;
-  const state = hasPrice ? verdict(base.gapPercent) : { text: isReference ? "참고 전용" : "가격 미입력", className: "neutral" };
+  const hasPrice = base.salePrice > 0;
+  const mileage = settings.showMileage && product.mileage30Eligible && hasPrice
+    ? calculate(product, priceData, settings, true)
+    : null;
+  const isEnded = effectiveProductStatus(product) === "ended";
+  const state = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const panelId = `product-card-panel-${product.id}`;
 
   return (
-    <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"}`}>
+    <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"} ${isEnded ? "ended" : ""}`}>
       <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
-        <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
+        <span className="card-rank">{!isEnded && hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
         <span className="card-product-main">
           <span className="card-product-name"><strong>{product.name}</strong></span>
           <span className="card-product-tags">
             <CategoryBadges product={product} />
             <ProductStatusBadge product={product} />
-            {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">마일 불가</span>}
+            {product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">마일 불가</span>}
             {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
           </span>
         </span>
         <span className="card-row-metric card-cash-price">
           <small>캐시</small>
-          <strong>{isReference ? "—" : `${formatNumber(product.cashPrice)}캐시`}</strong>
+          <strong>{formatNumber(product.cashPrice)}캐시</strong>
         </span>
         <span className="card-row-metric card-sale-price">
           <small>판매 기준가</small>
@@ -1244,6 +1282,13 @@ function ProductCard({
           <small>1억당 현금</small>
           <span className="card-efficiency-value">
             <strong>{formatWon(base.primaryPerEok)}</strong>
+            {mileage && (
+              <span className="card-mileage-comparison" aria-label={`마일리지 30% 적용 ${formatWon(mileage.primaryPerEok)}, ${formatNumber(mileage.mileageUsed)} 마일 필요`}>
+                <b>마일30</b>
+                <span>{formatWon(mileage.primaryPerEok)}</span>
+                <small>· {formatNumber(mileage.mileageUsed)}마일</small>
+              </span>
+            )}
             <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
           </span>
         </span>
@@ -1284,7 +1329,6 @@ function ProductAccordionDetails({
   onDetail: () => void;
 }) {
   const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
-  const isReference = product.category === "reference";
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const hasComponentSummary = includedCount > 1 || excludedCount > 0;
@@ -1300,18 +1344,16 @@ function ProductAccordionDetails({
           <strong>상품 상세</strong>
           <span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span>
         </div>
-        {!isReference && (
-          <label className="accordion-basis-select">
-            <span>판매 가격 기준</span>
-            <select value={priceData.priceBasis} onChange={(event) => onPriceBasisChange(event.target.value as PriceBasis)}>
-              <option value="current">현재 최저가</option>
-              <option value="recent">최근 체결가</option>
-            </select>
-          </label>
-        )}
+        <label className="accordion-basis-select">
+          <span>판매 가격 기준</span>
+          <select value={priceData.priceBasis} onChange={(event) => onPriceBasisChange(event.target.value as PriceBasis)}>
+            <option value="current">현재 최저가</option>
+            <option value="recent">최근 체결가</option>
+          </select>
+        </label>
       </div>
 
-      {!isReference && hasComponentSummary && (
+      {hasComponentSummary && (
         <section className="component-price-summary" aria-label={`${product.name} 구성품 가격 요약`}>
           <div className="component-price-summary-heading">
             <strong>구성품 가격</strong>
@@ -1338,26 +1380,22 @@ function ProductAccordionDetails({
         </section>
       )}
 
-      {isReference && (
-        <div className="reference-detail-note compact"><strong>마일리지 참고 품목</strong><p>일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
-      )}
-
       <div className="accordion-meta-actions">
         <div className="accordion-meta">
           <span>판매 스냅샷 {product.checkedAt}</span>
-          {!isReference && <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>}
-          {!isReference && <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>}
+          <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>
+          <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>
           {settings.showMileage && mileage && <span>마일30 {formatWon(mileage.primaryPerEok)} · {formatNumber(mileage.mileageUsed)} 마일 필요</span>}
           {priceData.note && <span>메모 · {priceData.note}</span>}
         </div>
         <div className="accordion-actions">
           <button className="secondary-button" type="button" onClick={onDetail}>상세 계산 보기</button>
-          {!isReference && <button className="primary-button" type="button" aria-expanded={showPriceEditor} aria-controls={priceEditorId} onClick={() => setShowPriceEditor((current) => !current)}>{showPriceEditor ? "상품가격 편집 닫기" : "상품가격 전체 편집"}</button>}
+          <button className="primary-button" type="button" aria-expanded={showPriceEditor} aria-controls={priceEditorId} onClick={() => setShowPriceEditor((current) => !current)}>{showPriceEditor ? "상품가격 편집 닫기" : "상품가격 전체 편집"}</button>
           <button className="secondary-button" type="button" aria-expanded={showSaleEditor} aria-controls={saleEditorId} onClick={() => setShowSaleEditor((current) => !current)}>{showSaleEditor ? "판매 상태 닫기" : "판매 상태 편집"}</button>
         </div>
       </div>
 
-      {!isReference && showPriceEditor && (
+      {showPriceEditor && (
         <section className="accordion-price-editor" id={priceEditorId} aria-label={`${product.name} 구성품별 가격 입력`}>
           <div className="accordion-price-heading">
             <div><strong>구성품별 경매장 가격</strong><small>현재 최저가와 최근 체결가를 억 메소 단위로 입력합니다.</small></div>
@@ -1420,7 +1458,6 @@ function ProductAccordionDetails({
 function ProductDetail({ product, priceData, settings, onEdit }: { product: CatalogProduct; priceData: ProductPriceData; settings: Settings; onEdit: () => void }) {
   const base = calculate(product, priceData, settings);
   const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
-  const isReference = product.category === "reference";
   const hasPrice = base.salePrice > 0;
   const baseVerdict = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
   const priceDivergence = divergence(product, priceData);
@@ -1432,29 +1469,23 @@ function ProductDetail({ product, priceData, settings, onEdit }: { product: Cata
       <span className="eyebrow">CALCULATION DETAIL</span>
       <div className="detail-title-row">
         <div><h2 id="detail-title">{product.name}</h2><p><CategoryBadges product={product} /> <span>· 확인 {product.checkedAt}</span></p></div>
-        {!isReference && <button className="secondary-button" type="button" onClick={onEdit}>상품 정보 수정</button>}
+        <button className="secondary-button" type="button" onClick={onEdit}>상품 정보 수정</button>
       </div>
-      {isReference ? (
-        <div className="reference-detail-note"><strong>마일리지 참고 품목</strong><p>레드작용 캐시 판매 상품과 분리되어 있으며 일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
-      ) : (
-        <>
-          {Math.abs(priceDivergence) >= 50 && (
-            <div className="price-warning"><strong>가격 차이를 확인해 주세요.</strong><span>현재 매물과 최근 체결가의 괴리율이 {priceDivergence >= 0 ? "+" : ""}{formatNumber(priceDivergence)}%입니다. 자동으로 가격 기준을 바꾸지 않았습니다.</span></div>
-          )}
-          <div className="detail-result">
-            <div><span>미적용 1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "구성품 시세를 입력해 주세요"}</small></div>
-            <div><span>판정</span><strong className={baseVerdict.className}>{baseVerdict.text}</strong><small>{hasPrice ? <>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</> : "계산 대기"}</small></div>
-            {mileage && <div className="mileage-highlight"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일리지 사용</small></div>}
-          </div>
-          <div className="formula-grid">
-            <FormulaBlock title="A. 마일리지 미적용" calculation={base} product={product} priceData={priceData} settings={settings} />
-            {mileage && <FormulaBlock title="B. 마일리지 30% 적용" calculation={mileage} product={product} priceData={priceData} settings={settings} mileage />}
-          </div>
-        </>
+      {Math.abs(priceDivergence) >= 50 && (
+        <div className="price-warning"><strong>가격 차이를 확인해 주세요.</strong><span>현재 매물과 최근 체결가의 괴리율이 {priceDivergence >= 0 ? "+" : ""}{formatNumber(priceDivergence)}%입니다. 자동으로 가격 기준을 바꾸지 않았습니다.</span></div>
       )}
+      <div className="detail-result">
+        <div><span>미적용 1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "구성품 시세를 입력해 주세요"}</small></div>
+        <div><span>판정</span><strong className={baseVerdict.className}>{baseVerdict.text}</strong><small>{hasPrice ? <>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</> : "계산 대기"}</small></div>
+        {mileage && <div className="mileage-highlight"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일리지 사용</small></div>}
+      </div>
+      <div className="formula-grid">
+        <FormulaBlock title="A. 마일리지 미적용" calculation={base} product={product} priceData={priceData} settings={settings} />
+        {mileage && <FormulaBlock title="B. 마일리지 30% 적용" calculation={mileage} product={product} priceData={priceData} settings={settings} mileage />}
+      </div>
       <section className="component-detail">
         <div className="component-detail-heading"><strong>패키지 구성</strong><span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span></div>
-        <ul>{product.components.map((component) => <li key={component.id}><span>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span>{!isReference && <b>{formatOptionalEok(componentPriceForBasis(priceData.componentPrices[component.id] ?? emptyComponentMarketPrice(), priceData.priceBasis) * component.quantity)}</b>}</li>)}</ul>
+        <ul>{product.components.map((component) => <li key={component.id}><span>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span><b>{formatOptionalEok(componentPriceForBasis(priceData.componentPrices[component.id] ?? emptyComponentMarketPrice(), priceData.priceBasis) * component.quantity)}</b></li>)}</ul>
         {excludedCount > 0 && <div className="excluded-components"><strong>계산 제외</strong><span>{product.excludedComponents.map((component) => `${component.name}${component.quantity > 1 ? ` × ${component.quantity}` : ""}`).join(" · ")}</span></div>}
       </section>
       {priceData.note && <div className="detail-note"><span>메모</span><p>{priceData.note}</p></div>}

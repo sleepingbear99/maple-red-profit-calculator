@@ -10,8 +10,7 @@ export type ProductCategory =
   | "bundle"
   | "coupon"
   | "job"
-  | "boss"
-  | "reference";
+  | "boss";
 
 export type ProductSubcategory =
   | "utility"
@@ -41,8 +40,7 @@ export type ProductSubcategory =
   | "anima"
   | "transcendent"
   | "friendsWorld"
-  | "bossSet"
-  | "mileageReference";
+  | "bossSet";
 
 export type ProductStatus =
   | "active"
@@ -77,7 +75,6 @@ export const CATEGORY_LABELS: Record<ProductCategory, string> = {
   coupon: "쿠폰",
   job: "직업 코디",
   boss: "보스 코디",
-  reference: "마일리지 참고",
 };
 
 export const SUBCATEGORY_LABELS: Record<ProductSubcategory, string> = {
@@ -109,7 +106,6 @@ export const SUBCATEGORY_LABELS: Record<ProductSubcategory, string> = {
   transcendent: "초월자",
   friendsWorld: "프렌즈 월드",
   bossSet: "보스 세트",
-  mileageReference: "마일리지 참고",
 };
 
 export const SUBCATEGORY_OPTIONS: Record<ProductCategory, ProductSubcategory[]> = {
@@ -119,7 +115,6 @@ export const SUBCATEGORY_OPTIONS: Record<ProductCategory, ProductSubcategory[]> 
   coupon: ["hair", "face", "mixDye", "mixLens", "genderChange", "allJob", "boss", "best"],
   job: ["adventurer", "cygnus", "heroes", "resistance", "demon", "nova", "flora", "anima", "transcendent", "friendsWorld"],
   boss: ["bossSet"],
-  reference: ["mileageReference"],
 };
 
 type ComponentInput = string | readonly [name: string, quantity: number];
@@ -239,14 +234,14 @@ const DEMON_PRODUCTS: CatalogProduct[] = [
 const RESISTANCE_PRODUCTS: CatalogProduct[] = [
   job("resistance-01", "레지스탕스 블래스터 패키지(남)", "레지스탕스", 12900, ["레지스탕스 블래스터 헤어밴드(남)", "레지스탕스 블래스터 슈트(남)", "레지스탕스 블래스터 슈즈(남)", "레지스탕스 블래스터 건틀렛 리볼버"]),
   job("resistance-02", "레지스탕스 블래스터 패키지(여)", "레지스탕스", 12900, ["레지스탕스 블래스터 헤어핀(여)", "레지스탕스 블래스터 슈트(여)", "레지스탕스 블래스터 슈즈(여)", "레지스탕스 블래스터 건틀렛 리볼버"]),
-  job("resistance-03", "레지스탕스 배틀메이지 패키지(남)", "레지스탕스", 12900, ["레지스탕스 배틀메이지 모자", "레지스탕스 배틀메이지 슈트(남)", "레지스탕스 배틀메이지 슈즈", "레지스탕스 배틀메이지 스태프"]),
-  job("resistance-04", "레지스탕스 배틀메이지 패키지(여)", "레지스탕스", 12900, ["레지스탕스 배틀메이지 모자", "레지스탕스 배틀메이지 슈트(여)", "레지스탕스 배틀메이지 슈즈", "레지스탕스 배틀메이지 스태프"]),
+  job("resistance-03", "레지스탕스 배틀메이지 패키지(남)", "레지스탕스", 12900, ["레지스탕스 배틀메이지 고글", "레지스탕스 배틀메이지 슈트(남)", "레지스탕스 배틀메이지 슈즈", "레지스탕스 배틀메이지 스태프"]),
+  job("resistance-04", "레지스탕스 배틀메이지 패키지(여)", "레지스탕스", 12900, ["레지스탕스 배틀메이지 고글", "레지스탕스 배틀메이지 슈트(여)", "레지스탕스 배틀메이지 슈즈", "레지스탕스 배틀메이지 스태프"]),
   job("resistance-05", "레지스탕스 와일드헌터 패키지(남)", "레지스탕스", 12900, ["레지스탕스 와일드헌터 헤어핀", "레지스탕스 와일드헌터 슈트(남)", "레지스탕스 와일드헌터 슈즈", "레지스탕스 와일드헌터 석궁"], ["레지스탕스 와일드헌터 글러브"]),
   job("resistance-06", "레지스탕스 와일드헌터 패키지(여)", "레지스탕스", 12900, ["레지스탕스 와일드헌터 헤어핀", "레지스탕스 와일드헌터 슈트(여)", "레지스탕스 와일드헌터 슈즈", "레지스탕스 와일드헌터 석궁"], ["레지스탕스 와일드헌터 글러브"]),
   job("resistance-07", "레지스탕스 제논 패키지(남)", "레지스탕스", 12900, ["레지스탕스 제논 이어피스", "레지스탕스 제논 슈트(남)", "레지스탕스 제논 슈즈", "레지스탕스 제논 에너지소드"], ["레지스탕스 제논 얼굴장식"]),
   job("resistance-08", "레지스탕스 제논 패키지(여)", "레지스탕스", 12900, ["레지스탕스 제논 이어피스", "레지스탕스 제논 슈트(여)", "레지스탕스 제논 슈즈", "레지스탕스 제논 에너지소드"], ["레지스탕스 제논 얼굴장식"]),
-  job("resistance-09", "레지스탕스 메카닉 패키지(남)", "레지스탕스", 12900, ["레지스탕스 메카닉 바이저", "레지스탕스 메카닉 슈트(남)", "레지스탕스 메카닉 슈즈", "레지스탕스 메카닉 무기"]),
-  job("resistance-10", "레지스탕스 메카닉 패키지(여)", "레지스탕스", 12900, ["레지스탕스 메카닉 바이저", "레지스탕스 메카닉 슈트(여)", "레지스탕스 메카닉 슈즈", "레지스탕스 메카닉 무기"]),
+  job("resistance-09", "레지스탕스 메카닉 패키지(남)", "레지스탕스", 12900, ["레지스탕스 메카닉 바이저", "레지스탕스 메카닉 슈트(남)", "레지스탕스 메카닉 슈즈", "레지스탕스 메카닉 건"]),
+  job("resistance-10", "레지스탕스 메카닉 패키지(여)", "레지스탕스", 12900, ["레지스탕스 메카닉 바이저", "레지스탕스 메카닉 슈트(여)", "레지스탕스 메카닉 슈즈", "레지스탕스 메카닉 건"]),
 ];
 
 const CYGNUS_PRODUCTS: CatalogProduct[] = [
@@ -293,8 +288,8 @@ const ADVENTURER_PRODUCTS: CatalogProduct[] = [
   job("adventurer-12", "모험가 신궁 패키지(남)", "모험가", 10000, ["모험가 신궁 슈트(남)", "모험가 신궁 부츠", "모험가 신궁 석궁"]),
   job("adventurer-13", "모험가 신궁 패키지(여)", "모험가", 10000, ["모험가 신궁 슈트(여)", "모험가 신궁 부츠", "모험가 신궁 석궁"]),
   job("adventurer-14", "모험가 패스파인더 패키지", "모험가", 10000, ["모험가 패스파인더 슈트", "모험가 패스파인더 부츠", "모험가 패스파인더 활"]),
-  job("adventurer-15", "모험가 나이트로드 패키지(남)", "모험가", 10000, ["모험가 나이트로드 슈트", "모험가 나이트로드 부츠", "모험가 나이트로드 표창"]),
-  job("adventurer-16", "모험가 나이트로드 패키지(여)", "모험가", 10000, ["모험가 나이트로드 슈트", "모험가 나이트로드 부츠", "모험가 나이트로드 표창"]),
+  job("adventurer-15", "모험가 나이트로드 패키지(남)", "모험가", 10000, ["모험가 나이트로드 슈트", "모험가 나이트로드 부츠", "모험가 나이트로드 표창"], ["모험가 나이트로드 헤어밴드(남)"]),
+  job("adventurer-16", "모험가 나이트로드 패키지(여)", "모험가", 10000, ["모험가 나이트로드 슈트", "모험가 나이트로드 부츠", "모험가 나이트로드 표창"], ["모험가 나이트로드 헤어밴드(여)"]),
   job("adventurer-17", "모험가 듀얼블레이드 패키지", "모험가", 10000, ["모험가 듀얼블레이드 슈트", "모험가 듀얼블레이드 부츠", "모험가 듀얼블레이드 단검"]),
   job("adventurer-18", "모험가 섀도어 패키지", "모험가", 10000, ["모험가 섀도어 슈트", "모험가 섀도어 부츠", "모험가 섀도어 단검"]),
   job("adventurer-19", "모험가 캐논슈터 패키지(남)", "모험가", 10000, ["모험가 캐논슈터 슈트(남)", "모험가 캐논슈터 부츠", "모험가 캐논슈터 캐논"]),
@@ -358,7 +353,7 @@ const BOSS_PRODUCTS: CatalogProduct[] = [
   boss("boss-19", "카링 패키지(남)", 14900, ["카링 비단 모자", "카링 비단옷(남)", "카링 비단신", "죽음의 손아귀", "카링의 악기"]),
   boss("boss-20", "카링 패키지(여)", 14900, ["카링 비단 모자", "카링 비단 치마(여)", "카링 비단신", "죽음의 손아귀", "카링의 악기"]),
   boss("boss-21", "익스트림 빅풋 패키지", 14900, ["빅풋 탈", "빅풋 슈트", "빅풋 슈즈", "빅풋 플레임", "빅풋 갑주"], ["파워풀 빅풋"]),
-  boss("boss-22", "림보 패키지", 14900, ["림보 날", "림보 슈트", "림보 슈즈", "도달한 진리", "오염된 근원"], ["림보 글러브"]),
+  boss("boss-22", "림보 패키지", 14900, ["림보 탈", "림보 슈트", "림보 슈즈", "도달한 진리", "오염된 근원"], ["림보 글러브"]),
 ];
 
 const JOB_PRODUCTS = [
@@ -380,22 +375,12 @@ export const CURRENT_PRODUCTS: CatalogProduct[] = [
   ...BOSS_PRODUCTS,
 ];
 
-export const MILEAGE_REFERENCES: CatalogProduct[] = [
-  product("mileage-reference-01", "붕어빵 뿌리기 11개", "reference", 0, { subcategory: "mileageReference" }),
-  product("mileage-reference-02", "달콤한 붕어빵 11개", "reference", 0, { subcategory: "mileageReference" }),
-  product("mileage-reference-03", "슈퍼파워버프", "reference", 0, { subcategory: "mileageReference" }),
-  product("mileage-reference-04", "마슈르의 선물기상효과", "reference", 0, { subcategory: "mileageReference" }),
-];
-
-export const ALL_CATALOG_PRODUCTS: CatalogProduct[] = [...CURRENT_PRODUCTS, ...MILEAGE_REFERENCES];
-
 export const INITIAL_DATA_COUNTS = {
   currentProducts: CURRENT_PRODUCTS.length,
   jobProducts: JOB_PRODUCTS.length,
   bossProducts: BOSS_PRODUCTS.length,
   basicAndRandomProducts: BASIC_AND_RANDOM_PRODUCTS.length,
   couponProducts: COUPON_PRODUCTS.length,
-  mileageReferences: MILEAGE_REFERENCES.length,
 };
 
 function validateInitialCatalog() {
@@ -423,12 +408,11 @@ function validateInitialCatalog() {
   if (INITIAL_DATA_COUNTS.basicAndRandomProducts !== 13) throw new Error(`기본·확률형·번들 합계 불일치: ${INITIAL_DATA_COUNTS.basicAndRandomProducts}/13`);
   if (INITIAL_DATA_COUNTS.couponProducts !== 12) throw new Error(`쿠폰 합계 불일치: ${INITIAL_DATA_COUNTS.couponProducts}/12`);
   if (INITIAL_DATA_COUNTS.currentProducts !== 127) throw new Error(`현재 판매 상품 합계 불일치: ${INITIAL_DATA_COUNTS.currentProducts}/127`);
-  if (INITIAL_DATA_COUNTS.mileageReferences !== 4) throw new Error(`마일리지 참고 합계 불일치: ${INITIAL_DATA_COUNTS.mileageReferences}/4`);
   if (CURRENT_PRODUCTS.filter((item) => item.mileage30Eligible).length !== 6) throw new Error("마일리지 30% 가능 상품은 6개여야 합니다.");
   if (CURRENT_PRODUCTS.some((item) => item.status !== "active" || item.checkedAt !== CHECKED_AT)) throw new Error("초기 상품의 판매 상태 또는 확인일이 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.some((item) => item.name === "블레어 살롱 헤어 쿠폰")) throw new Error("판매 종료 상품이 현재 판매 목록에 포함되었습니다.");
-  const ids = new Set(ALL_CATALOG_PRODUCTS.map((item) => item.id));
-  if (ids.size !== ALL_CATALOG_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");
+  const ids = new Set(CURRENT_PRODUCTS.map((item) => item.id));
+  if (ids.size !== CURRENT_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");
 }
 
 validateInitialCatalog();
