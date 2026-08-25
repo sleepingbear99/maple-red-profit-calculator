@@ -1224,13 +1224,13 @@ function ProductCard({
           <span className="card-product-tags">
             <CategoryBadges product={product} />
             <ProductStatusBadge product={product} />
-            {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30</span> : <span className="no-chip">마일 불가</span>}
-            {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}</span>}
+            {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">마일 불가</span>}
+            {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
           </span>
         </span>
         <span className="card-row-metric card-cash-price">
           <small>캐시</small>
-          <strong>{isReference ? "—" : formatNumber(product.cashPrice)}</strong>
+          <strong>{isReference ? "—" : `${formatNumber(product.cashPrice)}캐시`}</strong>
         </span>
         <span className="card-row-metric card-sale-price">
           <small>판매 기준가</small>

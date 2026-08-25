@@ -79,4 +79,11 @@ test("separates the ranking list from the component price grid", async () => {
   assert.match(css, /\.component-price-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(tabletStyles, /\.component-price-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(mobileStyles, /\.component-price-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(page, /마일30 가능/);
+  assert.match(page, /구성 \{includedCount \+ excludedCount\}개/);
+  assert.match(page, /`\$\{formatNumber\(product\.cashPrice\)\}캐시`/);
+  assert.match(css, /\.card-product-name > strong\s*\{[^}]*word-break:\s*keep-all;[^}]*overflow-wrap:\s*break-word;/s);
+  assert.match(css, /\.card-row-metric > strong\s*\{[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap;/s);
+  assert.match(css, /\.card-efficiency-value > em\s*\{[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap;/s);
+  assert.doesNotMatch(css, /\.card-efficiency-value > em\s*\{[^}]*white-space:\s*normal;/s);
 });
