@@ -1379,6 +1379,10 @@ footer > small,
   background: transparent;
   text-align: left;
 }
+.product-card-toggle.with-mileage {
+  grid-template-columns: 44px minmax(240px, 1fr) 82px 102px 102px 160px 160px 28px;
+  grid-template-areas: "rank identity cash sale net efficiency mileage chevron";
+}
 .product-card-toggle:hover { background: #fcfaf6; }
 .product-card-toggle:focus-visible { outline: 2px solid #9a7448; outline-offset: -2px; }
 .product-card-toggle > .card-rank {
@@ -1432,14 +1436,16 @@ footer > small,
 }
 .package-count { display: inline-flex; align-items: center; border-radius: 999px; color: #7e746c; background: #f1ede8; font-weight: 600; }
 .card-row-metric,
-.card-primary-efficiency {
+.card-primary-efficiency,
+.card-mileage-efficiency {
   display: grid;
   min-width: 0;
   gap: 3px;
   align-content: center;
 }
 .card-row-metric > small,
-.card-primary-efficiency > small { color: var(--muted); font-size: 11px; line-height: 1.2; }
+.card-primary-efficiency > small,
+.card-mileage-efficiency > small { color: var(--muted); font-size: 11px; line-height: 1.2; }
 .card-row-metric > strong {
   display: inline-flex;
   width: max-content;
@@ -1455,6 +1461,7 @@ footer > small,
 .card-sale-price { grid-area: sale; }
 .card-net-meso { grid-area: net; }
 .card-primary-efficiency { grid-area: efficiency; }
+.card-mileage-efficiency { grid-area: mileage; }
 .card-efficiency-value { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; }
 .card-efficiency-value > strong {
   display: inline-flex;
@@ -1477,20 +1484,32 @@ footer > small,
 .card-efficiency-value > em.positive { color: #9a7448; }
 .card-efficiency-value > em.negative { color: #a15c5c; }
 .card-efficiency-value > em.neutral { color: #7e746c; }
-.card-mileage-comparison {
+.card-mileage-value { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; }
+.card-mileage-value > strong,
+.card-mileage-empty {
   display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
+  width: max-content;
+  max-width: 100%;
   color: #8c6a46;
-  font-size: 11px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.card-mileage-value > em {
+  display: inline-flex;
+  font-size: 10px;
   font-style: normal;
+  font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   word-break: keep-all;
 }
-.card-mileage-comparison b { font-weight: 700; }
-.card-mileage-comparison > span { font-size: 12px; font-weight: 700; }
-.card-mileage-comparison > small { color: #8b8178; font-size: 10px; font-weight: 500; }
+.card-mileage-value > em.positive { color: #9a7448; }
+.card-mileage-value > em.negative { color: #a15c5c; }
+.card-mileage-value > em.neutral { color: #7e746c; }
+.card-mileage-value > small { color: #8b8178; font-size: 10px; font-weight: 500; white-space: nowrap; }
 .product-card-toggle > .chevron { grid-area: chevron; color: #765e4b; text-align: center; }
 .mobile-accordion-panel { padding: 16px; border-top: 1px solid #e5ddd5; }
 
@@ -1504,6 +1523,12 @@ footer > small,
       ". cash sale net efficiency .";
     gap: 7px 10px;
     padding: 10px 13px;
+  }
+  .product-card-toggle.with-mileage {
+    grid-template-columns: 36px repeat(5, minmax(0, 1fr)) 28px;
+    grid-template-areas:
+      "rank identity identity identity identity identity chevron"
+      ". cash sale net efficiency mileage .";
   }
   .accordion-detail-topline,
   .accordion-meta-actions { align-items: stretch; flex-direction: column; }
@@ -1523,6 +1548,13 @@ footer > small,
     gap: 8px 5px;
     padding: 10px;
   }
+  .product-card-toggle.with-mileage {
+    grid-template-columns: 28px repeat(4, minmax(0, 1fr)) 22px;
+    grid-template-areas:
+      "rank identity identity identity identity chevron"
+      ". cash sale net efficiency ."
+      ". mileage mileage mileage mileage .";
+  }
   .card-product-main { gap: 4px 6px; }
   .card-product-name > strong { font-size: 15px; }
   .card-product-tags { gap: 3px; }
@@ -1534,16 +1566,20 @@ footer > small,
   .card-product-tags .no-chip,
   .card-product-tags .package-count { min-height: 20px; padding: 2px 5px; font-size: 11px; }
   .card-row-metric,
-  .card-primary-efficiency { gap: 2px; }
+  .card-primary-efficiency,
+  .card-mileage-efficiency { gap: 2px; }
   .card-row-metric > small,
-  .card-primary-efficiency > small { font-size: 10px; }
+  .card-primary-efficiency > small,
+  .card-mileage-efficiency > small { font-size: 10px; }
   .card-row-metric > strong { font-size: 13px; }
   .card-efficiency-value { gap: 2px 4px; }
   .card-efficiency-value > strong { font-size: 15px; }
   .card-efficiency-value > em { font-size: 10px; }
-  .card-mileage-comparison { font-size: 10px; }
-  .card-mileage-comparison > span { font-size: 11px; }
-  .card-mileage-comparison > small { font-size: 9px; }
+  .card-mileage-efficiency { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; padding-top: 2px; }
+  .card-mileage-value { gap: 3px 5px; }
+  .card-mileage-value > strong { font-size: 14px; }
+  .card-mileage-value > em,
+  .card-mileage-value > small { font-size: 10px; }
   .mobile-accordion-panel { padding: 14px 13px; }
   .accordion-detail-topline,
   .accordion-price-heading { align-items: stretch; flex-direction: column; gap: 9px; }
@@ -1563,8 +1599,10 @@ footer > small,
 
 @media (max-width: 420px) {
   .product-card-toggle { grid-template-columns: 25px repeat(4, minmax(0, 1fr)) 19px; gap-inline: 3px; padding-inline: 8px; }
+  .product-card-toggle.with-mileage { grid-template-columns: 25px repeat(4, minmax(0, 1fr)) 19px; }
   .card-row-metric > small,
-  .card-primary-efficiency > small { font-size: 9px; }
+  .card-primary-efficiency > small,
+  .card-mileage-efficiency > small { font-size: 9px; }
   .card-row-metric > strong { font-size: 12px; }
   .card-efficiency-value > strong { font-size: 14px; }
   .card-efficiency-value > em { max-width: 100%; font-size: 9px; }

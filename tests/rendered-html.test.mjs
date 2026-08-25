@@ -111,6 +111,11 @@ test("keeps catalog corrections, mileage comparison, and ended-product ordering"
     readFile(new URL("../app/product-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
+  const tabletStart = css.lastIndexOf("@media (max-width: 1199px)");
+  const mobileStart = css.lastIndexOf("@media (max-width: 767px)");
+  const narrowMobileStart = css.lastIndexOf("@media (max-width: 420px)");
+  const tabletStyles = css.slice(tabletStart, mobileStart);
+  const mobileStyles = css.slice(mobileStart, narrowMobileStart);
 
   assert.doesNotMatch(catalog, /레지스탕스 메카닉 무기|레지스탕스 배틀메이지 모자|림보 날/);
   assert.match(catalog, /레지스탕스 메카닉 건/);
@@ -125,10 +130,20 @@ test("keeps catalog corrections, mileage comparison, and ended-product ordering"
   assert.doesNotMatch(css, /category-reference|reference-detail-note/);
 
   assert.match(page, /settings\.showMileage && product\.mileage30Eligible && hasPrice/);
-  assert.match(page, /className="card-mileage-comparison"/);
-  assert.match(page, /<b>마일30<\/b>/);
+  assert.match(page, /className=\{`product-card-toggle\$\{settings\.showMileage \? " with-mileage" : ""\}`\}/);
+  assert.match(page, /\{settings\.showMileage && \(\s*<span className="card-mileage-efficiency">/s);
+  assert.match(page, /<small>마일30 적용<\/small>/);
+  assert.match(page, /className="card-mileage-value"/);
   assert.match(page, /formatNumber\(mileage\.mileageUsed\)\}마일/);
-  assert.match(css, /\.card-mileage-comparison\s*\{[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap;/s);
+  assert.match(page, /<strong className="card-mileage-empty">—<\/strong>/);
+  assert.doesNotMatch(page, /className="card-mileage-comparison"/);
+  const primaryEfficiency = page.match(/<span className="card-primary-efficiency">[\s\S]*?<\/span>\s*<\/span>/)?.[0] ?? "";
+  assert.doesNotMatch(primaryEfficiency, /mileage|마일30/i);
+  assert.match(css, /\.product-card-toggle\.with-mileage\s*\{[^}]*grid-template-areas:\s*"rank identity cash sale net efficiency mileage chevron";/s);
+  assert.match(css, /\.card-mileage-efficiency\s*\{[^}]*grid-area:\s*mileage;/s);
+  assert.match(css, /\.card-mileage-value > strong,[\s\S]*\.card-mileage-empty\s*\{[^}]*white-space:\s*nowrap;/s);
+  assert.match(tabletStyles, /\.product-card-toggle\.with-mileage\s*\{[^}]*repeat\(5,\s*minmax\(0,\s*1fr\)\)[^}]*"\. cash sale net efficiency mileage \.";/s);
+  assert.match(mobileStyles, /\.product-card-toggle\.with-mileage\s*\{[^}]*"\. mileage mileage mileage mileage \.";/s);
 
   assert.match(page, /const aEnded = effectiveProductStatus\(a\) === "ended" \? 1 : 0;/);
   assert.match(page, /if \(aEnded !== bEnded\) return aEnded - bEnded;/);

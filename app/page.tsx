@@ -1339,13 +1339,14 @@ function ProductCard({
     : null;
   const isEnded = effectiveProductStatus(product) === "ended";
   const state = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
+  const mileageState = mileage ? verdict(mileage.gapPercent) : null;
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const panelId = `product-card-panel-${product.id}`;
 
   return (
     <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"} ${isEnded ? "ended" : ""}`}>
-      <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
+      <button className={`product-card-toggle${settings.showMileage ? " with-mileage" : ""}`} type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
         <span className="card-rank">{!isEnded && hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
         <span className="card-product-main">
           <span className="card-product-name"><strong>{product.name}</strong></span>
@@ -1372,16 +1373,21 @@ function ProductCard({
           <small>1억당 현금</small>
           <span className="card-efficiency-value">
             <strong>{formatWon(base.primaryPerEok)}</strong>
-            {mileage && (
-              <span className="card-mileage-comparison" aria-label={`마일리지 30% 적용 ${formatWon(mileage.primaryPerEok)}, ${formatNumber(mileage.mileageUsed)} 마일 필요`}>
-                <b>마일30</b>
-                <span>{formatWon(mileage.primaryPerEok)}</span>
-                <small>· {formatNumber(mileage.mileageUsed)}마일</small>
-              </span>
-            )}
             <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
           </span>
         </span>
+        {settings.showMileage && (
+          <span className="card-mileage-efficiency">
+            <small>마일30 적용</small>
+            {mileage && mileageState ? (
+              <span className="card-mileage-value" aria-label={`마일리지 30% 적용 ${formatWon(mileage.primaryPerEok)}, ${formatNumber(mileage.mileageUsed)}마일, 직구 대비 ${mileage.gapPercent >= 0 ? "+" : ""}${formatNumber(mileage.gapPercent, 1)}% ${mileageState.text}`}>
+                <strong>{formatWon(mileage.primaryPerEok)}</strong>
+                <em className={mileageState.className}>{mileage.gapPercent >= 0 ? "+" : ""}{formatNumber(mileage.gapPercent, 1)}% {mileageState.text}</em>
+                <small>{formatNumber(mileage.mileageUsed)}마일</small>
+              </span>
+            ) : <strong className="card-mileage-empty">—</strong>}
+          </span>
+        )}
         <span className="chevron" aria-hidden="true">⌄</span>
       </button>
       {expanded && (
