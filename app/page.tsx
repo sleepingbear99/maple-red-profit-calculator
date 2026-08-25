@@ -57,7 +57,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 7;
+const STORAGE_VERSION = 8;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -132,6 +132,7 @@ const LEGACY_CATEGORY_MAP: Record<string, ProductCategory | undefined> = {
 };
 
 const LEGACY_SUBCATEGORY_MAP: Record<string, ProductSubcategory | undefined> = {
+  ring: "utility",
   gift: "boutique",
   multiPack: "boutique",
   crystal: "lunaCrystal",
@@ -521,7 +522,7 @@ function CategoryBadges({ product }: { product: CatalogProduct }) {
     <span className="category-badges">
       <span className={`category-badge category-${product.category}`}>{CATEGORY_LABELS[product.category]}</span>
       {product.subcategory && <span className="subcategory-badge">{SUBCATEGORY_LABELS[product.subcategory]}</span>}
-      {product.tags.filter((tag) => tag !== "mileage30").map((tag) => (
+      {product.tags.filter((tag) => tag !== "mileage30" && tag !== "multiPack" && tag !== "freestyle").map((tag) => (
         <span className="product-tag-badge" key={tag}>{PRODUCT_TAG_LABELS[tag]}</span>
       ))}
     </span>
@@ -1258,7 +1259,7 @@ export default function Home() {
             <div className="editor-grid">
               <label className="full"><span>상품명</span><input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="예: 플래티넘 카르마의 가위" autoFocus /></label>
               <label><span>카테고리</span><select value={editor.category} onChange={(event) => { const category = event.target.value as ProductCategory; setEditor({ ...editor, category, subcategory: SUBCATEGORY_OPTIONS[category][0] }); }}>{(Object.entries(CATEGORY_LABELS) as [ProductCategory, string][]).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-              <label><span>세부 분류</span><select value={editor.subcategory ?? SUBCATEGORY_OPTIONS[editor.category][0]} onChange={(event) => setEditor({ ...editor, subcategory: event.target.value as ProductSubcategory })}>{SUBCATEGORY_OPTIONS[editor.category].map((key) => <option key={key} value={key}>{SUBCATEGORY_LABELS[key]}</option>)}</select></label>
+              <label><span>세부 분류</span><select value={editor.subcategory ?? ""} onChange={(event) => setEditor({ ...editor, subcategory: event.target.value ? event.target.value as ProductSubcategory : undefined })}>{editor.category === "coupon" && <option value="">없음</option>}{SUBCATEGORY_OPTIONS[editor.category].map((key) => <option key={key} value={key}>{SUBCATEGORY_LABELS[key]}</option>)}</select></label>
               <label><span>캐시 가격</span><span className="affix-input"><input type="number" min="0" value={editor.cashPrice} onChange={(event) => setEditor({ ...editor, cashPrice: safeNumber(event.target.value) })} /><small>캐시</small></span></label>
               <label><span>판매 스냅샷 확인일</span><input type="date" value={editor.checkedAt} onChange={(event) => setEditor({ ...editor, checkedAt: event.target.value })} /></label>
               <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option></select></label>

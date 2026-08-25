@@ -897,7 +897,7 @@ footer > small,
   border: 1px solid transparent;
   color: var(--muted);
   background: transparent;
-  white-space: normal;
+  white-space: nowrap;
 }
 .filter-tabs button:hover { color: var(--green); background: #f5f0eb; }
 .filter-tabs button.active { border-color: #dfd0c1; color: var(--green); background: #f7efe3; }

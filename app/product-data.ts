@@ -13,13 +13,14 @@ export type ProductCategory =
 
 export type ProductSubcategory =
   | "utility"
-  | "ring"
   | "transferScroll"
   | "prism"
   | "royal"
   | "lunaCrystal"
   | "wonderberry"
   | "boutique"
+  | "platinumApple"
+  | "masterpiece"
   | "hair"
   | "face"
   | "mixCoupon"
@@ -42,7 +43,8 @@ export type ProductTag =
   | "boss"
   | "allJob"
   | "illustrationCollection"
-  | "mileage30";
+  | "mileage30"
+  | "freestyle";
 
 export type ProductStatus =
   | "active"
@@ -81,13 +83,14 @@ export const CATEGORY_LABELS: Record<ProductCategory, string> = {
 
 export const SUBCATEGORY_LABELS: Record<ProductSubcategory, string> = {
   utility: "편의",
-  ring: "반지",
   transferScroll: "전승 스크롤",
   prism: "프리즘",
   royal: "로얄",
   lunaCrystal: "루나 크리스탈",
   wonderberry: "원더베리",
   boutique: "부티크",
+  platinumApple: "플래티넘 애플",
+  masterpiece: "마스터피스",
   hair: "헤어",
   face: "성형",
   mixCoupon: "믹스 쿠폰",
@@ -112,11 +115,12 @@ export const PRODUCT_TAG_LABELS: Record<ProductTag, string> = {
   allJob: "전 직업",
   illustrationCollection: "일러스트 컬렉션",
   mileage30: "마일30",
+  freestyle: "프리스타일",
 };
 
 export const SUBCATEGORY_OPTIONS: Record<ProductCategory, ProductSubcategory[]> = {
-  basic: ["utility", "ring", "transferScroll", "prism"],
-  random: ["royal", "lunaCrystal", "wonderberry", "boutique"],
+  basic: ["utility", "transferScroll", "prism"],
+  random: ["royal", "lunaCrystal", "wonderberry", "boutique", "platinumApple", "masterpiece"],
   coupon: ["hair", "face", "mixCoupon", "genderChange"],
   job: ["adventurer", "cygnus", "heroes", "resistance", "demon", "nova", "flora", "anima", "transcendent", "friendsWorld"],
   boss: ["bossSet"],
@@ -208,7 +212,7 @@ function boss(
 
 const BASIC_AND_RANDOM_PRODUCTS: CatalogProduct[] = [
   product("basic-01", "플래티넘 카르마의 가위", "basic", 5900, { subcategory: "utility", mileage30Eligible: true }),
-  product("basic-02", "혈맹의 반지", "basic", 5900, { subcategory: "ring" }),
+  product("basic-02", "혈맹의 반지", "basic", 5900, { subcategory: "utility" }),
   product("basic-03", "마네킹", "basic", 18900, { subcategory: "utility" }),
   product("basic-04", "추가옵션 전승 스크롤", "basic", 49000, { subcategory: "transferScroll" }),
   product("basic-05", "잠재능력 전승스크롤", "basic", 99000, { subcategory: "transferScroll" }),
@@ -220,6 +224,9 @@ const BASIC_AND_RANDOM_PRODUCTS: CatalogProduct[] = [
   product("random-03", "스페셜 루나 크리스탈", "random", 3900, { subcategory: "lunaCrystal" }),
   product("random-04", "위습의 원더베리", "random", 5400, { subcategory: "wonderberry" }),
   product("random-05", "위습의 원더베리 11개", "random", 54000, { subcategory: "wonderberry", components: [["위습의 원더베리", 11]] }),
+  product("random-06", "플래티넘 애플", "random", 3500, { subcategory: "platinumApple" }),
+  product("random-07", "플래티넘 애플 33개", "random", 99000, { subcategory: "platinumApple", tags: ["multiPack"], components: [["플래티넘 애플", 33]] }),
+  product("random-08", "프리미엄 마스터피스", "random", 1900, { subcategory: "masterpiece" }),
   product("bundle-01", "부티크 기프트", "random", 3300, { subcategory: "boutique", status: "ended" }),
   product("bundle-02", "부티크 기프트 10개", "random", 33000, { subcategory: "boutique", tags: ["multiPack"], status: "ended", components: [["부티크 기프트", 10]] }),
 ];
@@ -237,6 +244,8 @@ const COUPON_PRODUCTS: CatalogProduct[] = [
   product("coupon-10", "성별 변경 쿠폰", "coupon", 15000, { subcategory: "genderChange" }),
   product("coupon-11", "커스텀 믹스 컬러렌즈 쿠폰", "coupon", 24000, { subcategory: "mixCoupon" }),
   product("coupon-12", "커스텀 믹스염색 쿠폰", "coupon", 48000, { subcategory: "mixCoupon" }),
+  product("coupon-13", "프리스타일 쿠폰", "coupon", 5500, { tags: ["freestyle"] }),
+  product("coupon-14", "프리스타일 쿠폰 10개", "coupon", 49500, { tags: ["freestyle", "multiPack"], components: [["프리스타일 쿠폰", 10]] }),
 ];
 
 const DEMON_PRODUCTS: CatalogProduct[] = [
@@ -423,10 +432,10 @@ function validateInitialCatalog() {
   if (INITIAL_DATA_COUNTS.jobProducts !== 80) throw new Error(`직업 코디 합계 불일치: ${INITIAL_DATA_COUNTS.jobProducts}/80`);
   if (INITIAL_DATA_COUNTS.bossProducts !== 22) throw new Error(`보스 코디 합계 불일치: ${INITIAL_DATA_COUNTS.bossProducts}/22`);
   if (INITIAL_DATA_COUNTS.basicProducts !== 8) throw new Error(`기본 상품 합계 불일치: ${INITIAL_DATA_COUNTS.basicProducts}/8`);
-  if (INITIAL_DATA_COUNTS.randomProducts !== 7) throw new Error(`확률형 상품 합계 불일치: ${INITIAL_DATA_COUNTS.randomProducts}/7`);
-  if (INITIAL_DATA_COUNTS.basicAndRandomProducts !== 15) throw new Error(`기본·확률형 합계 불일치: ${INITIAL_DATA_COUNTS.basicAndRandomProducts}/15`);
-  if (INITIAL_DATA_COUNTS.couponProducts !== 12) throw new Error(`쿠폰 합계 불일치: ${INITIAL_DATA_COUNTS.couponProducts}/12`);
-  if (INITIAL_DATA_COUNTS.currentProducts !== 129) throw new Error(`현재 판매 상품 합계 불일치: ${INITIAL_DATA_COUNTS.currentProducts}/129`);
+  if (INITIAL_DATA_COUNTS.randomProducts !== 10) throw new Error(`확률형 상품 합계 불일치: ${INITIAL_DATA_COUNTS.randomProducts}/10`);
+  if (INITIAL_DATA_COUNTS.basicAndRandomProducts !== 18) throw new Error(`기본·확률형 합계 불일치: ${INITIAL_DATA_COUNTS.basicAndRandomProducts}/18`);
+  if (INITIAL_DATA_COUNTS.couponProducts !== 14) throw new Error(`쿠폰 합계 불일치: ${INITIAL_DATA_COUNTS.couponProducts}/14`);
+  if (INITIAL_DATA_COUNTS.currentProducts !== 134) throw new Error(`현재 판매 상품 합계 불일치: ${INITIAL_DATA_COUNTS.currentProducts}/134`);
   if (CURRENT_PRODUCTS.filter((item) => item.mileage30Eligible).length !== 8) throw new Error("마일리지 30% 가능 상품은 8개여야 합니다.");
   if (CURRENT_PRODUCTS.some((item) => item.checkedAt !== CHECKED_AT)) throw new Error("초기 상품의 확인일이 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.some((item) => item.status !== "active" && !["bundle-01", "bundle-02"].includes(item.id))) throw new Error("초기 상품의 판매 상태가 올바르지 않습니다.");
