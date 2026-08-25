@@ -1,0 +1,13 @@
+project_id = "maple-red-profit-calculator"
+
+[functions.unlock-editor]
+verify_jwt = false
+
+[functions.validate-editor]
+verify_jwt = false
+
+[functions.save-shared-data]
+verify_jwt = false
+
+[functions.revoke-editor]
+verify_jwt = false

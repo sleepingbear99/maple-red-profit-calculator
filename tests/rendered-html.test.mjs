@@ -278,5 +278,62 @@ test("corrects Cannon Shooter components and disables accidental number-input in
   assert.match(page, /document\.addEventListener\("wheel", preventNumberInputWheel, \{ capture: true, passive: false \}\)/);
   assert.match(page, /target\.type === "number"[\s\S]*document\.activeElement === target[\s\S]*event\.preventDefault\(\)/);
   assert.match(css, /input\[type="number"\]\s*\{[^}]*appearance:\s*textfield;[^}]*-moz-appearance:\s*textfield;/s);
-  assert.match(css, /input\[type="number"\]::\-webkit-inner-spin-button,[\s\S]*input\[type="number"\]::\-webkit-outer-spin-button\s*\{[^}]*-webkit-appearance:\s*none;/s);
+  assert.match(css, /input\[type="number"\]::-webkit-inner-spin-button,[\s\S]*input\[type="number"\]::-webkit-outer-spin-button\s*\{[^}]*-webkit-appearance:\s*none;/s);
+});
+
+test("adds local-first Supabase sync without weakening existing storage or write security", async () => {
+  const [page, cloud, css, schema, common, unlock, save, revoke, workflow, setup] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/cloud-sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/schema.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/_shared/common.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/unlock-editor/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/save-shared-data/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/revoke-editor/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/deploy-pages.yml", import.meta.url), "utf8"),
+    readFile(new URL("../SUPABASE_SETUP.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const STORAGE_KEY = "red-work-profit-calculator-v1"/);
+  assert.doesNotMatch(page, /localStorage\.removeItem\(STORAGE_KEY\)|localStorage\.clear\(\)/);
+  assert.match(cloud, /EDITOR_TOKEN_KEY = "mapleRedEditorToken"/);
+  assert.match(cloud, /PRE_CLOUD_BACKUP_KEY = "mapleRedPreCloudBackup_v1"/);
+  assert.match(cloud, /apikey: publicCloudConfig\.publishableKey/);
+  assert.doesNotMatch(cloud, /Authorization: `Bearer \$\{publicCloudConfig\.publishableKey\}`/);
+  assert.match(page, /window\.localStorage\.setItem\(PRE_CLOUD_BACKUP_KEY, currentLocalData\)/);
+  assert.match(page, /if \(snapshot\.empty\)[\s\S]*setNeedsCloudMigration\(needsMigration\)/);
+  assert.match(page, /function queueCloudSave[\s\S]*window\.setTimeout\(\(\) => \{ void flushCloudChanges\(\); \}, 800\)/);
+  assert.match(page, /클라우드 저장 실패 · 로컬에는 저장되었습니다\./);
+  assert.match(page, /이 기기에서 처음 수정할 때만 확인합니다\. PIN 원문은 저장되지 않습니다\./);
+  assert.match(page, /이 기기의 수정 권한 해제/);
+  assert.match(page, /현재 데이터로 공유 시작/);
+  assert.match(page, /pendingFullUpload: true/);
+  assert.match(page, /product\.id\.startsWith\("user-"\) \? \{ catalogProduct: product \} : \{\}/);
+  assert.match(css, /\.pin-modal/);
+
+  assert.match(schema, /alter table public\.shared_settings enable row level security/);
+  assert.match(schema, /for select\s+to anon, authenticated\s+using \(true\)/s);
+  assert.match(schema, /revoke all on public\.shared_settings, public\.product_overrides, public\.component_overrides from anon, authenticated/);
+  assert.match(schema, /grant select on public\.shared_settings, public\.product_overrides, public\.component_overrides to anon, authenticated/);
+  assert.match(schema, /security definer/);
+  assert.match(schema, /grant execute on function public\.merge_shared_payload[\s\S]*to service_role/);
+  assert.doesNotMatch(schema, /grant (?:insert|update|delete|all)[^;]*to anon/i);
+
+  assert.match(common, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(common, /\.eq\("token_hash", tokenHash\)[\s\S]*\.is\("revoked_at", null\)[\s\S]*\.gt\("expires_at"/s);
+  assert.match(unlock, /ADMIN_PIN_HASH/);
+  assert.match(unlock, /constantTimeEqual/);
+  assert.match(unlock, /365 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(save, /verifyEditSession/);
+  assert.match(save, /rpc\("merge_shared_payload"/);
+  assert.match(revoke, /revoked_at/);
+
+  assert.match(workflow, /VITE_SUPABASE_URL:\s*\$\{\{ secrets\.VITE_SUPABASE_URL \}\}/);
+  assert.match(workflow, /VITE_SUPABASE_PUBLISHABLE_KEY:\s*\$\{\{ secrets\.VITE_SUPABASE_PUBLISHABLE_KEY \}\}/);
+  assert.match(setup, /supabase functions deploy unlock-editor --no-verify-jwt/);
+  assert.match(setup, /TEST A~J/);
+
+  const browserSources = `${page}\n${cloud}`;
+  assert.doesNotMatch(browserSources, /SUPABASE_SERVICE_ROLE_KEY|ADMIN_PIN_HASH|ADMIN_PIN_SALT|RATE_LIMIT_SECRET/);
 });

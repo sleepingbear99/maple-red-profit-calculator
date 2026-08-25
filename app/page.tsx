@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   CATEGORY_LABELS,
   CURRENT_PRODUCTS,
@@ -15,6 +15,20 @@ import {
   type ProductStatusSource,
   type ProductSubcategory,
 } from "./product-data";
+import {
+  CLOUD_META_KEY,
+  EDITOR_TOKEN_KEY,
+  PRE_CLOUD_BACKUP_KEY,
+  CloudRequestError,
+  cloudConfigured,
+  fetchSharedSnapshot,
+  revokeEditorToken,
+  saveSharedPayload,
+  unlockEditor,
+  validateEditorToken,
+  type SharedSavePayload,
+  type SharedSnapshot,
+} from "./cloud-sync";
 
 type PriceBasis = "current" | "recent";
 type CategoryFilter = "all" | ProductCategory;
@@ -56,9 +70,36 @@ type PlanItem = {
 
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
+type CloudSyncMeta = {
+  version: 1;
+  settingsUpdatedAt: Partial<Record<keyof Settings, string>>;
+  productUpdatedAt: Record<string, string>;
+  componentUpdatedAt: Record<string, string>;
+  cloudMigrationVersion: number;
+  pendingFullUpload: boolean;
+};
+
+type CloudStatus = "local" | "loading" | "synced" | "saving" | "offline" | "permission" | "migration";
+type EditorAccess = "local" | "checking" | "readonly" | "unlocked";
+
+type PendingCloudChanges = {
+  settings: boolean;
+  productIds: Set<string>;
+  componentIds: Set<string>;
+};
+
 const STORAGE_KEY = "red-work-profit-calculator-v1";
 const STORAGE_VERSION = 9;
 const MILEAGE_RATE = 0.05;
+
+const EMPTY_CLOUD_META: CloudSyncMeta = {
+  version: 1,
+  settingsUpdatedAt: {},
+  productUpdatedAt: {},
+  componentUpdatedAt: {},
+  cloudMigrationVersion: 0,
+  pendingFullUpload: false,
+};
 
 const DEFAULT_SETTINGS: Settings = {
   mesoPrice: 1550,
@@ -414,6 +455,176 @@ function migrateLegacyPriceData(products: CatalogProduct[], legacyProducts: unkn
   return migrated;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseCloudMeta(value: string | null): CloudSyncMeta {
+  if (!value) return { ...EMPTY_CLOUD_META, settingsUpdatedAt: {}, productUpdatedAt: {}, componentUpdatedAt: {} };
+  try {
+    const parsed = JSON.parse(value) as Partial<CloudSyncMeta>;
+    return {
+      version: 1,
+      settingsUpdatedAt: isRecord(parsed.settingsUpdatedAt) ? parsed.settingsUpdatedAt as CloudSyncMeta["settingsUpdatedAt"] : {},
+      productUpdatedAt: isRecord(parsed.productUpdatedAt) ? parsed.productUpdatedAt as Record<string, string> : {},
+      componentUpdatedAt: isRecord(parsed.componentUpdatedAt) ? parsed.componentUpdatedAt as Record<string, string> : {},
+      cloudMigrationVersion: typeof parsed.cloudMigrationVersion === "number" ? parsed.cloudMigrationVersion : 0,
+      pendingFullUpload: parsed.pendingFullUpload === true,
+    };
+  } catch {
+    return { ...EMPTY_CLOUD_META, settingsUpdatedAt: {}, productUpdatedAt: {}, componentUpdatedAt: {} };
+  }
+}
+
+function timestampValue(value: unknown) {
+  if (typeof value !== "string") return 0;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function snapshotContainsPayload(snapshot: SharedSnapshot, payload: SharedSavePayload) {
+  if (payload.settings) {
+    if (!snapshot.settings || stableJson(snapshot.settings.data) !== stableJson(payload.settings.data)) return false;
+  }
+  const remoteProducts = new Map(snapshot.products.map((row) => [row.productId, row.data]));
+  if ((payload.products ?? []).some((row) => stableJson(remoteProducts.get(row.productId)) !== stableJson(row.data))) return false;
+  const remoteComponents = new Map(snapshot.components.map((row) => [row.componentId, row.data]));
+  return !(payload.components ?? []).some((row) => stableJson(remoteComponents.get(row.componentId)) !== stableJson(row.data));
+}
+
+function hasMeaningfulLocalData(settings: Settings, products: CatalogProduct[], priceData: PriceDataMap) {
+  if ((Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).some((key) => settings[key] !== DEFAULT_SETTINGS[key])) return true;
+  if (products.length !== DEFAULT_PRODUCTS.length) return true;
+  const defaultsById = new Map(DEFAULT_PRODUCTS.map((product) => [product.id, product]));
+  if (products.some((product) => {
+    const fallback = defaultsById.get(product.id);
+    if (!fallback) return true;
+    return product.name !== fallback.name || product.cashPrice !== fallback.cashPrice ||
+      product.status !== fallback.status || product.statusSource !== fallback.statusSource ||
+      product.saleStartAt !== fallback.saleStartAt || product.saleEndAt !== fallback.saleEndAt ||
+      product.checkedAt !== fallback.checkedAt;
+  })) return true;
+  return Object.values(priceData).some((productPrice) => (
+    productPrice.priceBasis !== "current" || productPrice.saleLimit !== null || productPrice.note.trim() !== "" ||
+    Object.values(productPrice.componentPrices).some((componentPrice) => (
+      componentPrice.currentMarketPrice !== null || componentPrice.recentTradePrice !== null
+    ))
+  ));
+}
+
+function mergeSharedSnapshot(
+  snapshot: SharedSnapshot,
+  currentSettings: Settings,
+  currentProducts: CatalogProduct[],
+  currentPriceData: PriceDataMap,
+  currentMeta: CloudSyncMeta,
+  preferCloud: boolean,
+) {
+  const nextSettings = { ...currentSettings };
+  const nextProducts = currentProducts.map((product) => ({ ...product }));
+  const nextPriceData = Object.fromEntries(Object.entries(currentPriceData).map(([id, productPrice]) => [id, {
+    ...productPrice,
+    componentPrices: { ...productPrice.componentPrices },
+  }])) as PriceDataMap;
+  const nextMeta: CloudSyncMeta = {
+    ...currentMeta,
+    settingsUpdatedAt: { ...currentMeta.settingsUpdatedAt },
+    productUpdatedAt: { ...currentMeta.productUpdatedAt },
+    componentUpdatedAt: { ...currentMeta.componentUpdatedAt },
+    cloudMigrationVersion: 1,
+    pendingFullUpload: false,
+  };
+
+  if (snapshot.settings) {
+    const values = isRecord(snapshot.settings.data.values) ? snapshot.settings.data.values : snapshot.settings.data;
+    const fieldUpdatedAt = isRecord(snapshot.settings.data.fieldUpdatedAt) ? snapshot.settings.data.fieldUpdatedAt : {};
+    for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+      const remoteValue = values[key];
+      const remoteUpdatedAt = typeof fieldUpdatedAt[key] === "string" ? fieldUpdatedAt[key] as string : snapshot.settings.updatedAt;
+      const localUpdatedAt = nextMeta.settingsUpdatedAt[key];
+      if (!preferCloud && timestampValue(remoteUpdatedAt) <= timestampValue(localUpdatedAt)) continue;
+      if (typeof DEFAULT_SETTINGS[key] === "number" && typeof remoteValue !== "number") continue;
+      if (typeof DEFAULT_SETTINGS[key] === "boolean" && typeof remoteValue !== "boolean") continue;
+      if (typeof DEFAULT_SETTINGS[key] === "string" && typeof remoteValue !== "string") continue;
+      Object.assign(nextSettings, { [key]: remoteValue });
+      nextMeta.settingsUpdatedAt[key] = remoteUpdatedAt;
+    }
+  }
+
+  const productIndex = new Map(nextProducts.map((product, index) => [product.id, index]));
+  for (const row of snapshot.products) {
+    if (!isRecord(row.data)) continue;
+    let index = productIndex.get(row.productId);
+    if (index !== undefined && !preferCloud && timestampValue(row.updatedAt) <= timestampValue(nextMeta.productUpdatedAt[row.productId])) continue;
+    if (row.productId.startsWith("user-") && isRecord(row.data.catalogProduct)) {
+      const cloudProduct = mergeSavedProduct(row.data.catalogProduct as SavedProductRecord);
+      if (cloudProduct?.id === row.productId) {
+        if (index === undefined) {
+          index = nextProducts.length;
+          productIndex.set(row.productId, index);
+          nextProducts.push(cloudProduct);
+          nextPriceData[row.productId] = createEmptyProductPrice(cloudProduct);
+        } else {
+          nextProducts[index] = cloudProduct;
+        }
+      }
+    }
+    if (index === undefined) continue;
+    const product = nextProducts[index];
+    const productPrice = nextPriceData[row.productId] ?? createEmptyProductPrice(product);
+    const nextProduct = { ...product };
+    if (isProductStatus(row.data.status)) nextProduct.status = row.data.status;
+    if (isProductStatusSource(row.data.statusSource)) nextProduct.statusSource = row.data.statusSource;
+    nextProduct.saleStartAt = normalizeSaleDate(row.data.saleStartAt);
+    nextProduct.saleEndAt = normalizeSaleDate(row.data.saleEndAt);
+    if (typeof row.data.checkedAt === "string") nextProduct.checkedAt = row.data.checkedAt;
+    nextProducts[index] = nextProduct;
+    nextPriceData[row.productId] = {
+      ...productPrice,
+      priceBasis: row.data.priceBasis === "recent" ? "recent" : "current",
+      saleLimit: normalizeNullableNumber(row.data.saleLimit),
+      note: typeof row.data.note === "string" ? row.data.note : "",
+      updatedAt: row.updatedAt,
+    };
+    nextMeta.productUpdatedAt[row.productId] = row.updatedAt;
+  }
+
+  const componentOwner = new Map<string, string>();
+  for (const product of nextProducts) {
+    for (const component of product.components) componentOwner.set(component.id, product.id);
+  }
+  for (const row of snapshot.components) {
+    const productId = componentOwner.get(row.componentId);
+    if (!productId || !isRecord(row.data)) continue;
+    if (!preferCloud && timestampValue(row.updatedAt) <= timestampValue(nextMeta.componentUpdatedAt[row.componentId])) continue;
+    const product = nextProducts[productIndex.get(productId) ?? -1];
+    if (!product) continue;
+    const productPrice = nextPriceData[productId] ?? createEmptyProductPrice(product);
+    nextPriceData[productId] = {
+      ...productPrice,
+      componentPrices: {
+        ...productPrice.componentPrices,
+        [row.componentId]: {
+          currentMarketPrice: normalizeNullableNumber(row.data.currentMarketPrice),
+          recentTradePrice: normalizeNullableNumber(row.data.recentTradePrice),
+        },
+      },
+      updatedAt: timestampValue(row.updatedAt) > timestampValue(productPrice.updatedAt) ? row.updatedAt : productPrice.updatedAt,
+    };
+    nextMeta.componentUpdatedAt[row.componentId] = row.updatedAt;
+  }
+
+  return { settings: nextSettings, products: nextProducts, priceData: nextPriceData, meta: nextMeta };
+}
+
 function componentPriceForBasis(price: ComponentMarketPrice, basis: PriceBasis) {
   if (basis === "recent") return price.recentTradePrice ?? 0;
   return price.currentMarketPrice ?? 0;
@@ -561,25 +772,50 @@ export default function Home() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [editor, setEditor] = useState<ProductDraft | null>(null);
   const [notice, setNotice] = useState("");
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>(cloudConfigured ? "loading" : "local");
+  const [editorAccess, setEditorAccess] = useState<EditorAccess>(cloudConfigured ? "checking" : "local");
+  const [needsCloudMigration, setNeedsCloudMigration] = useState(false);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSubmitting, setPinSubmitting] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const settingsRef = useRef(settings);
+  const productsRef = useRef(products);
+  const priceDataRef = useRef(priceData);
+  const cloudMetaRef = useRef<CloudSyncMeta>({ ...EMPTY_CLOUD_META, settingsUpdatedAt: {}, productUpdatedAt: {}, componentUpdatedAt: {} });
+  const pendingCloudChangesRef = useRef<PendingCloudChanges>({ settings: false, productIds: new Set(), componentIds: new Set() });
+  const pendingEditRef = useRef<(() => void) | null>(null);
+  const cloudSaveTimerRef = useRef<number | null>(null);
+  const pinInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => { productsRef.current = products; }, [products]);
+  useEffect(() => { priceDataRef.current = priceData; }, [priceData]);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.settings) setSettings({ ...DEFAULT_SETTINGS, ...parsed.settings });
+        const nextSettings = parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : DEFAULT_SETTINGS;
+        setSettings(nextSettings);
+        settingsRef.current = nextSettings;
         const nextProducts = migrateCatalogProducts(parsed.version, parsed.products);
         setProducts(nextProducts);
-        setPriceData(parsed.version >= 2
+        productsRef.current = nextProducts;
+        const nextPriceData = parsed.version >= 2
           ? normalizePriceData(nextProducts, parsed.priceData)
-          : migrateLegacyPriceData(nextProducts, parsed.products));
+          : migrateLegacyPriceData(nextProducts, parsed.products);
+        setPriceData(nextPriceData);
+        priceDataRef.current = nextPriceData;
         if (Array.isArray(parsed.plan)) {
           const validIds = new Set(nextProducts.map((item) => item.id));
           setPlan(parsed.plan.filter((item: PlanItem) => validIds.has(item.productId)));
         }
         if (typeof parsed.goalCash === "number") setGoalCash(parsed.goalCash);
       }
+      cloudMetaRef.current = parseCloudMeta(window.localStorage.getItem(CLOUD_META_KEY));
     } catch {
       setNotice("저장된 데이터를 읽지 못해 기본값으로 시작했어요.");
     } finally {
@@ -594,6 +830,96 @@ export default function Home() {
       JSON.stringify({ version: STORAGE_VERSION, settings, products, priceData, plan, goalCash }),
     );
   }, [settings, products, priceData, plan, goalCash, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !cloudConfigured) return;
+    let cancelled = false;
+
+    const syncFromCloud = async () => {
+      setCloudStatus("loading");
+      const storedToken = window.localStorage.getItem(EDITOR_TOKEN_KEY);
+      try {
+        const snapshot = await fetchSharedSnapshot();
+        if (cancelled) return;
+
+        const meaningfulLocalData = hasMeaningfulLocalData(settingsRef.current, productsRef.current, priceDataRef.current);
+        const meta = cloudMetaRef.current;
+        if (snapshot.empty) {
+          const needsMigration = meaningfulLocalData || meta.pendingFullUpload;
+          setNeedsCloudMigration(needsMigration);
+          setCloudStatus(needsMigration ? "migration" : "synced");
+        } else if (meaningfulLocalData && meta.cloudMigrationVersion < 1) {
+          setNeedsCloudMigration(true);
+          setCloudStatus("migration");
+        } else {
+          const merged = mergeSharedSnapshot(
+            snapshot,
+            settingsRef.current,
+            productsRef.current,
+            priceDataRef.current,
+            meta,
+            !meaningfulLocalData,
+          );
+          settingsRef.current = merged.settings;
+          productsRef.current = merged.products;
+          priceDataRef.current = merged.priceData;
+          cloudMetaRef.current = merged.meta;
+          setSettings(merged.settings);
+          setProducts(merged.products);
+          setPriceData(merged.priceData);
+          window.localStorage.setItem(CLOUD_META_KEY, JSON.stringify(merged.meta));
+          setNeedsCloudMigration(false);
+          setCloudStatus("synced");
+        }
+
+        if (storedToken) {
+          try {
+            const valid = await validateEditorToken(storedToken);
+            if (cancelled) return;
+            if (valid) {
+              setEditorAccess("unlocked");
+              const pending = pendingEditRef.current;
+              pendingEditRef.current = null;
+              pending?.();
+              const dirty = pendingCloudChangesRef.current;
+              if (dirty.settings || dirty.productIds.size || dirty.componentIds.size) queueCloudSave();
+            } else {
+              window.localStorage.removeItem(EDITOR_TOKEN_KEY);
+              setEditorAccess("readonly");
+              if (pendingEditRef.current) setPinModalOpen(true);
+            }
+          } catch {
+            if (cancelled) return;
+            setEditorAccess("unlocked");
+            setCloudStatus("offline");
+            const pending = pendingEditRef.current;
+            pendingEditRef.current = null;
+            pending?.();
+            if (pending) setNotice("클라우드에 연결할 수 없어 이 기기에만 저장했습니다.");
+          }
+        } else {
+          setEditorAccess("readonly");
+          if (pendingEditRef.current) setPinModalOpen(true);
+        }
+      } catch {
+        if (cancelled) return;
+        setCloudStatus("offline");
+        setEditorAccess(storedToken ? "unlocked" : "readonly");
+        const pending = pendingEditRef.current;
+        pendingEditRef.current = null;
+        pending?.();
+        if (pending) setNotice("클라우드에 연결할 수 없어 이 기기에만 저장했습니다.");
+      }
+    };
+
+    void syncFromCloud();
+    const reconnect = () => { void syncFromCloud(); };
+    window.addEventListener("online", reconnect);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", reconnect);
+    };
+  }, [hydrated]);
 
   useEffect(() => {
     const preventNumberInputWheel = (event: WheelEvent) => {
@@ -611,6 +937,16 @@ export default function Home() {
     return () => document.removeEventListener("wheel", preventNumberInputWheel, true);
   }, []);
 
+  useEffect(() => () => {
+    if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!pinModalOpen) return;
+    const frame = window.requestAnimationFrame(() => pinInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [pinModalOpen]);
+
   useEffect(() => {
     if (!notice) return;
     const timeout = window.setTimeout(() => setNotice(""), 3200);
@@ -622,6 +958,10 @@ export default function Home() {
       if (event.key === "Escape") {
         setDetailId(null);
         setEditor(null);
+        setPinModalOpen(false);
+        setPinValue("");
+        setPinError("");
+        pendingEditRef.current = null;
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -714,21 +1054,283 @@ export default function Home() {
   const remainingGoal = Math.max(goalCash - planTotals.cashPurchased, 0);
   const goalProgress = goalCash > 0 ? Math.min((planTotals.cashPurchased / goalCash) * 100, 100) : 0;
 
+  const persistCloudMeta = (meta: CloudSyncMeta) => {
+    cloudMetaRef.current = meta;
+    window.localStorage.setItem(CLOUD_META_KEY, JSON.stringify(meta));
+  };
+
+  const buildSharedSavePayload = (full: boolean, meta = cloudMetaRef.current): SharedSavePayload => {
+    const pending = pendingCloudChangesRef.current;
+    const productIds = full ? new Set(productsRef.current.map((product) => product.id)) : pending.productIds;
+    const componentIds = full
+      ? new Set(productsRef.current.flatMap((product) => product.components.map((component) => component.id)))
+      : pending.componentIds;
+    const settingsTimes = Object.values(meta.settingsUpdatedAt).filter((value): value is string => typeof value === "string");
+    const settingsUpdatedAt = settingsTimes.sort().at(-1) ?? new Date().toISOString();
+    const completeSettingsTimes = Object.fromEntries(
+      (Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).map((key) => [key, meta.settingsUpdatedAt[key] ?? new Date(0).toISOString()]),
+    );
+    const productsById = new Map(productsRef.current.map((product) => [product.id, product]));
+    const componentOwner = new Map<string, string>();
+    for (const product of productsRef.current) {
+      for (const component of product.components) componentOwner.set(component.id, product.id);
+    }
+
+    return {
+      settings: full || pending.settings ? {
+        data: { values: settingsRef.current, fieldUpdatedAt: completeSettingsTimes },
+        updatedAt: settingsUpdatedAt,
+      } : null,
+      products: Array.from(productIds).flatMap((productId) => {
+        const product = productsById.get(productId);
+        if (!product) return [];
+        const productPrice = getProductPrice(priceDataRef.current, product);
+        return [{
+          productId,
+          data: {
+            ...(product.id.startsWith("user-") ? { catalogProduct: product } : {}),
+            status: product.status,
+            statusSource: product.statusSource,
+            saleStartAt: product.saleStartAt ?? null,
+            saleEndAt: product.saleEndAt ?? null,
+            checkedAt: product.checkedAt,
+            priceBasis: productPrice.priceBasis,
+            saleLimit: productPrice.saleLimit,
+            note: productPrice.note,
+          },
+          updatedAt: meta.productUpdatedAt[productId] ?? new Date().toISOString(),
+        }];
+      }),
+      components: Array.from(componentIds).flatMap((componentId) => {
+        const productId = componentOwner.get(componentId);
+        const product = productId ? productsById.get(productId) : null;
+        if (!productId || !product) return [];
+        const componentPrice = getProductPrice(priceDataRef.current, product).componentPrices[componentId] ?? emptyComponentMarketPrice();
+        return [{
+          componentId,
+          data: componentPrice,
+          updatedAt: meta.componentUpdatedAt[componentId] ?? new Date().toISOString(),
+        }];
+      }),
+    };
+  };
+
+  function queueCloudSave() {
+    if (!cloudConfigured) return;
+    if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
+    cloudSaveTimerRef.current = window.setTimeout(() => { void flushCloudChanges(); }, 800);
+  }
+
+  async function flushCloudChanges() {
+    const token = window.localStorage.getItem(EDITOR_TOKEN_KEY);
+    if (!token) {
+      setCloudStatus((current) => current === "offline" ? current : "permission");
+      return;
+    }
+    const pending = pendingCloudChangesRef.current;
+    if (!pending.settings && pending.productIds.size === 0 && pending.componentIds.size === 0) return;
+    const captured: PendingCloudChanges = {
+      settings: pending.settings,
+      productIds: new Set(pending.productIds),
+      componentIds: new Set(pending.componentIds),
+    };
+    const payload = buildSharedSavePayload(false);
+    pendingCloudChangesRef.current = { settings: false, productIds: new Set(), componentIds: new Set() };
+    setCloudStatus("saving");
+    try {
+      await saveSharedPayload(token, payload);
+      setCloudStatus("synced");
+      const remaining = pendingCloudChangesRef.current;
+      if (remaining.settings || remaining.productIds.size || remaining.componentIds.size) queueCloudSave();
+    } catch (error) {
+      const remaining = pendingCloudChangesRef.current;
+      remaining.settings = remaining.settings || captured.settings;
+      captured.productIds.forEach((id) => remaining.productIds.add(id));
+      captured.componentIds.forEach((id) => remaining.componentIds.add(id));
+      if (error instanceof CloudRequestError && [401, 403].includes(error.status ?? 0)) {
+        window.localStorage.removeItem(EDITOR_TOKEN_KEY);
+        setEditorAccess("readonly");
+        setCloudStatus("permission");
+        setNotice("수정 권한이 만료되었습니다. 로컬 데이터는 유지됩니다.");
+      } else {
+        setCloudStatus("offline");
+        setNotice("클라우드 저장 실패 · 로컬에는 저장되었습니다.");
+      }
+    }
+  }
+
+  const markSettingsChanged = (key: keyof Settings) => {
+    const now = new Date().toISOString();
+    persistCloudMeta({
+      ...cloudMetaRef.current,
+      settingsUpdatedAt: { ...cloudMetaRef.current.settingsUpdatedAt, [key]: now },
+    });
+    pendingCloudChangesRef.current.settings = true;
+    queueCloudSave();
+  };
+
+  const markProductChanged = (productId: string) => {
+    const now = new Date().toISOString();
+    persistCloudMeta({
+      ...cloudMetaRef.current,
+      productUpdatedAt: { ...cloudMetaRef.current.productUpdatedAt, [productId]: now },
+    });
+    pendingCloudChangesRef.current.productIds.add(productId);
+    queueCloudSave();
+  };
+
+  const markComponentChanged = (componentId: string) => {
+    const now = new Date().toISOString();
+    persistCloudMeta({
+      ...cloudMetaRef.current,
+      componentUpdatedAt: { ...cloudMetaRef.current.componentUpdatedAt, [componentId]: now },
+    });
+    pendingCloudChangesRef.current.componentIds.add(componentId);
+    queueCloudSave();
+  };
+
+  const requestSharedEdit = (action: () => void) => {
+    if (!cloudConfigured || editorAccess === "local" || editorAccess === "unlocked") {
+      action();
+      return;
+    }
+    if (cloudStatus === "offline") {
+      action();
+      return;
+    }
+    pendingEditRef.current = action;
+    if (editorAccess !== "checking") {
+      setPinError("");
+      setPinModalOpen(true);
+    }
+  };
+
+  const handlePinSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pinValue.trim() || pinSubmitting) return;
+    setPinSubmitting(true);
+    setPinError("");
+    try {
+      const result = await unlockEditor(pinValue.trim());
+      window.localStorage.setItem(EDITOR_TOKEN_KEY, result.token);
+      setEditorAccess("unlocked");
+      setPinValue("");
+      setPinModalOpen(false);
+      setCloudStatus(needsCloudMigration ? "migration" : "synced");
+      const pending = pendingEditRef.current;
+      pendingEditRef.current = null;
+      pending?.();
+      setNotice("이 기기에서 수정이 활성화되었습니다.");
+    } catch (error) {
+      setPinError(error instanceof CloudRequestError && error.status === 429
+        ? "인증 시도가 많습니다. 잠시 후 다시 시도해 주세요."
+        : "PIN을 확인해 주세요.");
+    } finally {
+      setPinSubmitting(false);
+    }
+  };
+
+  const cancelPin = () => {
+    pendingEditRef.current = null;
+    setPinValue("");
+    setPinError("");
+    setPinModalOpen(false);
+  };
+
+  const continueLocalOnly = () => {
+    const pending = pendingEditRef.current;
+    pendingEditRef.current = null;
+    setPinModalOpen(false);
+    setPinError("");
+    pending?.();
+    setNotice("클라우드에 연결할 수 없어 이 기기에만 저장했습니다.");
+  };
+
+  const uploadCurrentData = async () => {
+    const token = window.localStorage.getItem(EDITOR_TOKEN_KEY);
+    if (!token) {
+      setCloudStatus("permission");
+      return;
+    }
+    const existingBackup = window.localStorage.getItem(PRE_CLOUD_BACKUP_KEY);
+    const currentLocalData = window.localStorage.getItem(STORAGE_KEY);
+    if (!existingBackup && currentLocalData) window.localStorage.setItem(PRE_CLOUD_BACKUP_KEY, currentLocalData);
+
+    const now = new Date().toISOString();
+    const nextMeta: CloudSyncMeta = {
+      version: 1,
+      settingsUpdatedAt: Object.fromEntries((Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).map((key) => [key, now])),
+      productUpdatedAt: Object.fromEntries(productsRef.current.map((product) => [product.id, now])),
+      componentUpdatedAt: Object.fromEntries(productsRef.current.flatMap((product) => product.components.map((component) => [component.id, now]))),
+      cloudMigrationVersion: 0,
+      pendingFullUpload: true,
+    };
+    persistCloudMeta(nextMeta);
+    setCloudStatus("saving");
+    try {
+      const payload = buildSharedSavePayload(true, nextMeta);
+      await saveSharedPayload(token, payload);
+      const verification = await fetchSharedSnapshot();
+      if (verification.empty || !snapshotContainsPayload(verification, payload)) throw new Error("cloud snapshot verification failed");
+      const completedMeta = { ...nextMeta, cloudMigrationVersion: 1, pendingFullUpload: false };
+      persistCloudMeta(completedMeta);
+      setNeedsCloudMigration(false);
+      setCloudStatus("synced");
+      setNotice("현재 데이터로 공유를 시작했습니다.");
+    } catch (error) {
+      if (error instanceof CloudRequestError && [401, 403].includes(error.status ?? 0)) {
+        window.localStorage.removeItem(EDITOR_TOKEN_KEY);
+        setEditorAccess("readonly");
+        setCloudStatus("permission");
+      } else {
+        setCloudStatus("offline");
+      }
+      setNotice("공유 시작에 실패했습니다. 기존 데이터는 이 기기에 그대로 보존됩니다.");
+    }
+  };
+
+  const startCloudMigration = () => requestSharedEdit(() => { void uploadCurrentData(); });
+
+  const releaseEditorAccess = async () => {
+    const token = window.localStorage.getItem(EDITOR_TOKEN_KEY);
+    if (!token) {
+      setEditorAccess("readonly");
+      return;
+    }
+    try {
+      await revokeEditorToken(token);
+      window.localStorage.removeItem(EDITOR_TOKEN_KEY);
+      setEditorAccess("readonly");
+      setNotice("이 기기의 수정 권한을 해제했습니다.");
+    } catch {
+      setNotice("수정 권한 해제에 실패했습니다. 연결을 확인해 주세요.");
+    }
+  };
+
   const updateSettings = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    setSettings((current) => ({ ...current, [key]: value }));
+    requestSharedEdit(() => {
+      setSettings((current) => ({ ...current, [key]: value }));
+      markSettingsChanged(key);
+    });
   };
 
   const updateProduct = (id: string, changes: Partial<CatalogProduct>) => {
-    setProducts((current) => current.map((product) => (product.id === id ? { ...product, ...changes } : product)));
+    requestSharedEdit(() => {
+      setProducts((current) => current.map((product) => (product.id === id ? { ...product, ...changes } : product)));
+      markProductChanged(id);
+    });
   };
 
   const updateProductPrice = (id: string, changes: Partial<ProductPriceData>) => {
     const product = products.find((candidate) => candidate.id === id);
     if (!product) return;
-    setPriceData((current) => ({
-      ...current,
-      [id]: { ...getProductPrice(current, product), ...changes },
-    }));
+    requestSharedEdit(() => {
+      setPriceData((current) => ({
+        ...current,
+        [id]: { ...getProductPrice(current, product), ...changes, updatedAt: new Date().toISOString() },
+      }));
+      markProductChanged(id);
+    });
   };
 
   const updateComponentMarketPrice = (
@@ -739,22 +1341,25 @@ export default function Home() {
   ) => {
     const product = products.find((candidate) => candidate.id === productId);
     if (!product) return;
-    setPriceData((current) => {
-      const currentProductPrice = getProductPrice(current, product);
-      return {
-        ...current,
-        [productId]: {
-          ...currentProductPrice,
-          componentPrices: {
-            ...currentProductPrice.componentPrices,
-            [componentId]: {
-              ...(currentProductPrice.componentPrices[componentId] ?? emptyComponentMarketPrice()),
-              [key]: value,
+    requestSharedEdit(() => {
+      setPriceData((current) => {
+        const currentProductPrice = getProductPrice(current, product);
+        return {
+          ...current,
+          [productId]: {
+            ...currentProductPrice,
+            componentPrices: {
+              ...currentProductPrice.componentPrices,
+              [componentId]: {
+                ...(currentProductPrice.componentPrices[componentId] ?? emptyComponentMarketPrice()),
+                [key]: value,
+              },
             },
+            updatedAt: new Date().toISOString(),
           },
-          updatedAt: new Date().toISOString(),
-        },
-      };
+        };
+      });
+      markComponentChanged(componentId);
     });
   };
 
@@ -806,32 +1411,36 @@ export default function Home() {
       setNotice("상품명과 캐시 가격을 확인해 주세요.");
       return;
     }
-    const { isNew, priceBasis, componentPrices, saleLimit, note, updatedAt, ...productFields } = editor;
-    const normalizedProduct: CatalogProduct = {
-      ...productFields,
-      name: productFields.name.trim(),
-      subcategory: productFields.subcategory,
-      tags: Array.from(new Set<ProductTag>([
-        ...productFields.tags.filter((tag) => tag !== "mileage30"),
-        ...(productFields.mileage30Eligible ? ["mileage30" as const] : []),
-      ])),
-      components: productFields.components.map((component) => ({
-        ...component,
-        name: component.name.trim() || productFields.name.trim(),
-        quantity: Math.max(1, Math.floor(component.quantity)),
-      })),
-    };
-    const normalizedPrice: ProductPriceData = { priceBasis, componentPrices, saleLimit, note, updatedAt };
-    if (isNew) {
-      setProducts((current) => [...current, normalizedProduct]);
-      setPriceData((current) => ({ ...current, [normalizedProduct.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
-      setNotice("새 상품을 추가했어요.");
-    } else {
-      setProducts((current) => current.map((product) => (product.id === editor.id ? normalizedProduct : product)));
-      setPriceData((current) => ({ ...current, [editor.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
-      setNotice("상품 정보를 저장했어요.");
-    }
-    setEditor(null);
+    requestSharedEdit(() => {
+      const { isNew, priceBasis, componentPrices, saleLimit, note, updatedAt, ...productFields } = editor;
+      const normalizedProduct: CatalogProduct = {
+        ...productFields,
+        name: productFields.name.trim(),
+        subcategory: productFields.subcategory,
+        tags: Array.from(new Set<ProductTag>([
+          ...productFields.tags.filter((tag) => tag !== "mileage30"),
+          ...(productFields.mileage30Eligible ? ["mileage30" as const] : []),
+        ])),
+        components: productFields.components.map((component) => ({
+          ...component,
+          name: component.name.trim() || productFields.name.trim(),
+          quantity: Math.max(1, Math.floor(component.quantity)),
+        })),
+      };
+      const normalizedPrice: ProductPriceData = { priceBasis, componentPrices, saleLimit, note, updatedAt: new Date().toISOString() };
+      if (isNew) {
+        setProducts((current) => [...current, normalizedProduct]);
+        setPriceData((current) => ({ ...current, [normalizedProduct.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
+        setNotice("새 상품을 추가했어요.");
+      } else {
+        setProducts((current) => current.map((product) => (product.id === editor.id ? normalizedProduct : product)));
+        setPriceData((current) => ({ ...current, [editor.id]: normalizeProductPrice(normalizedProduct, normalizedPrice) }));
+        setNotice("상품 정보를 저장했어요.");
+      }
+      markProductChanged(normalizedProduct.id);
+      normalizedProduct.components.forEach((component) => markComponentChanged(component.id));
+      setEditor(null);
+    });
   };
 
   const addPlanItem = () => {
@@ -877,7 +1486,15 @@ export default function Home() {
       const validIds = new Set(importedProducts.map((item) => item.id));
       setPlan(Array.isArray(parsed.plan) ? parsed.plan.filter((item: PlanItem) => validIds.has(item.productId)) : []);
       setGoalCash(typeof parsed.goalCash === "number" ? parsed.goalCash : 1500000);
-      setNotice("백업 데이터를 불러왔어요.");
+      if (cloudConfigured) {
+        const nextMeta = { ...cloudMetaRef.current, pendingFullUpload: true };
+        persistCloudMeta(nextMeta);
+        setNeedsCloudMigration(true);
+        setCloudStatus("migration");
+        setNotice("백업 데이터를 불러왔어요. 확인 후 공유 데이터에 반영할 수 있습니다.");
+      } else {
+        setNotice("백업 데이터를 불러왔어요.");
+      }
     } catch {
       setNotice("올바른 계산기 JSON 파일이 아니에요.");
     }
@@ -897,6 +1514,16 @@ export default function Home() {
 
   const bestCalculation = bestProduct ? calculate(bestProduct, getProductPrice(priceData, bestProduct), settings) : null;
   const bestVerdict = bestCalculation ? verdict(bestCalculation.gapPercent) : null;
+  const cloudStatusText: Record<CloudStatus, string> = {
+    local: "이 기기에 자동 저장",
+    loading: "공유 데이터 확인 중...",
+    synced: "공유 데이터 동기화됨",
+    saving: "저장 중...",
+    offline: "클라우드 연결 실패 · 이 기기에 저장됨",
+    permission: "수정 권한 필요",
+    migration: "기존 데이터 보호 중",
+  };
+  const editorAccessText = editorAccess === "unlocked" ? "수정 가능" : "조회 전용";
 
   return (
     <main>
@@ -913,7 +1540,7 @@ export default function Home() {
           <a href="#planner">전체 계산</a>
         </nav>
         <div className="top-actions">
-          <span className="save-state"><i aria-hidden="true" /> 이 기기에 자동 저장</span>
+          <span className={`save-state cloud-state cloud-${cloudStatus}`}><i aria-hidden="true" /> {cloudStatusText[cloudStatus]}{cloudConfigured && <small>{editorAccessText}</small>}</span>
           <button className="text-button" type="button" onClick={exportData}>내보내기</button>
           <button className="text-button" type="button" onClick={() => importRef.current?.click()}>가져오기</button>
           <input ref={importRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={importData} />
@@ -968,6 +1595,18 @@ export default function Home() {
               <input type="checkbox" checked={settings.showMileage} onChange={(event) => updateSettings("showMileage", event.target.checked)} />
             </label>
           </div>
+          {cloudConfigured && (
+            <div className="cloud-access-row">
+              <span><i aria-hidden="true" /> {editorAccessText}</span>
+              {editorAccess === "unlocked" && <button className="text-button release-access" type="button" onClick={() => { void releaseEditorAccess(); }}>이 기기의 수정 권한 해제</button>}
+            </div>
+          )}
+          {cloudConfigured && needsCloudMigration && (
+            <div className="cloud-migration-notice" role="status">
+              <span><strong>이 기기의 기존 데이터를 공유 데이터로 사용할 수 있습니다.</strong><small>현재 localStorage 데이터는 유지되며, 업로드 전 별도 안전 백업도 만듭니다.</small></span>
+              <button className="secondary-button" type="button" onClick={startCloudMigration}>현재 데이터로 공유 시작</button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1301,6 +1940,27 @@ export default function Home() {
               <button className="primary-button" type="button" onClick={saveProduct}>저장하기</button>
             </div>
           </section>
+        </div>
+      )}
+
+      {pinModalOpen && (
+        <div className="modal-backdrop pin-backdrop" role="presentation" onMouseDown={cancelPin}>
+          <form className="modal pin-modal" role="dialog" aria-modal="true" aria-labelledby="pin-title" onSubmit={handlePinSubmit} onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="수정 권한 확인 닫기" onClick={cancelPin}>×</button>
+            <span className="eyebrow">EDITOR ACCESS</span>
+            <h2 id="pin-title">수정 권한 확인</h2>
+            <p className="modal-lead">이 기기에서 처음 수정할 때만 확인합니다. PIN 원문은 저장되지 않습니다.</p>
+            <label className="pin-field">
+              <span>관리자 PIN</span>
+              <input ref={pinInputRef} type="password" inputMode="numeric" autoComplete="one-time-code" value={pinValue} onChange={(event) => setPinValue(event.target.value)} />
+            </label>
+            {pinError && <p className="pin-error" role="alert">{pinError}</p>}
+            <div className="modal-actions pin-actions">
+              <button className="secondary-button" type="button" onClick={cancelPin}>취소</button>
+              {cloudStatus === "offline" && <button className="secondary-button" type="button" onClick={continueLocalOnly}>이 기기에만 수정</button>}
+              <button className="primary-button" type="submit" disabled={pinSubmitting || !pinValue.trim()}>{pinSubmitting ? "확인 중..." : "수정 활성화"}</button>
+            </div>
+          </form>
         </div>
       )}
 
