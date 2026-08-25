@@ -1283,11 +1283,11 @@ function ProductAccordionDetails({
   onProductChange: (changes: Partial<CatalogProduct>) => void;
   onDetail: () => void;
 }) {
-  const base = calculate(product, priceData, settings);
   const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
   const isReference = product.category === "reference";
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
+  const hasComponentSummary = includedCount > 1 || excludedCount > 0;
   const [showPriceEditor, setShowPriceEditor] = useState(false);
   const [showSaleEditor, setShowSaleEditor] = useState(false);
   const priceEditorId = useId();
@@ -1311,13 +1311,31 @@ function ProductAccordionDetails({
         )}
       </div>
 
-      {!isReference && (
-        <div className="accordion-result-strip">
-          <div><span>캐시 가격</span><strong>{formatNumber(product.cashPrice)}캐시</strong></div>
-          <div><span>판매 기준가 ({BASIS_LABEL[priceData.priceBasis]})</span><strong>{formatOptionalEok(base.salePrice)}</strong></div>
-          <div><span>실수령 메소</span><strong>{formatOptionalEok(base.netMeso)}</strong></div>
-          <div><span>1억당 현금 ({base.salePrice > 0 ? `직구 대비 ${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}%` : "가격 입력 필요"})</span><strong>{formatWon(base.primaryPerEok)}</strong></div>
-        </div>
+      {!isReference && hasComponentSummary && (
+        <section className="component-price-summary" aria-label={`${product.name} 구성품 가격 요약`}>
+          <div className="component-price-summary-heading">
+            <strong>구성품 가격</strong>
+            <small>{BASIS_LABEL[priceData.priceBasis]} 기준</small>
+          </div>
+          <div className="component-price-summary-grid">
+            {product.components.map((component) => {
+              const componentPrice = priceData.componentPrices[component.id] ?? emptyComponentMarketPrice();
+              const selectedComponentPrice = componentPriceForBasis(componentPrice, priceData.priceBasis) * component.quantity;
+              return (
+                <div className="component-price-summary-item" key={component.id}>
+                  <span>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</span>
+                  <strong>{formatOptionalEok(selectedComponentPrice)}</strong>
+                </div>
+              );
+            })}
+          </div>
+          {excludedCount > 0 && (
+            <div className="component-summary-excluded">
+              <strong>계산 제외</strong>
+              <ul>{product.excludedComponents.map((component) => <li key={component.id}>{component.name}{component.quantity > 1 ? ` × ${component.quantity}` : ""}</li>)}</ul>
+            </div>
+          )}
+        </section>
       )}
 
       {isReference && (

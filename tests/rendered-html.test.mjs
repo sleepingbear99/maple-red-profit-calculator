@@ -71,6 +71,7 @@ test("separates the ranking list from the component price grid", async () => {
   const narrowMobileStart = css.lastIndexOf("@media (max-width: 420px)");
   const tabletStyles = css.slice(tabletStart, mobileStart);
   const mobileStyles = css.slice(mobileStart, narrowMobileStart);
+  const narrowMobileStyles = css.slice(narrowMobileStart);
 
   assert.match(page, /className="product-card-list"/);
   assert.match(page, /className="component-price-grid"/);
@@ -94,4 +95,12 @@ test("separates the ranking list from the component price grid", async () => {
   assert.match(css, /\.accordion-actions \.primary-button\s*\{[^}]*background:\s*#806753;/s);
   assert.match(css, /\.accordion-actions \.secondary-button\s*\{[^}]*background:\s*#fffdf9;/s);
   assert.match(tabletStyles, /\.accordion-meta\s*\{[^}]*flex:\s*0 0 auto;/s);
+  assert.doesNotMatch(page, /className="accordion-result-strip"/);
+  assert.match(page, /const hasComponentSummary = includedCount > 1 \|\| excludedCount > 0/);
+  assert.match(page, /!isReference && hasComponentSummary && \(\s*<section className="component-price-summary"/s);
+  assert.match(page, /componentPriceForBasis\(componentPrice, priceData\.priceBasis\) \* component\.quantity/);
+  assert.match(css, /\.component-price-summary-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(tabletStyles, /\.component-price-summary-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(mobileStyles, /\.component-price-summary-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(narrowMobileStyles, /\.component-price-summary-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 });
