@@ -39,6 +39,8 @@ test("server-renders the current profit calculator", async () => {
   assert.match(html, /상품 효율 순위/);
   assert.match(html, /현재 메소 현금 시세/);
   assert.match(html, /상품명·패키지·구성품 검색/);
+  assert.match(html, /백업 파일 저장/);
+  assert.match(html, /백업 파일 복원/);
   assert.match(html, /aria-expanded="false"/i);
   assert.doesNotMatch(html, /codex-preview|Building your site|SkeletonPreview/i);
 });
@@ -336,4 +338,48 @@ test("adds local-first Supabase sync without weakening existing storage or write
 
   const browserSources = `${page}\n${cloud}`;
   assert.doesNotMatch(browserSources, /SUPABASE_SERVICE_ROLE_KEY|ADMIN_PIN_HASH|ADMIN_PIN_SALT|RATE_LIMIT_SECRET/);
+});
+
+test("provides validated PC backup and explicit-only cloud restore", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const BACKUP_TYPE = "maple-red-profit-calculator"/);
+  assert.match(page, /const BACKUP_SCHEMA_VERSION = 1/);
+  assert.match(page, /const BEFORE_RESTORE_BACKUP_KEY = "mapleRedBeforeRestoreBackup_v1"/);
+  assert.match(page, /backupType: BACKUP_TYPE,[\s\S]*schemaVersion: BACKUP_SCHEMA_VERSION,[\s\S]*exportedAt: new Date\(\)\.toISOString\(\),[\s\S]*settings: \{ \.\.\.settings \},[\s\S]*products: productRecords,[\s\S]*components: componentRecords/s);
+  assert.match(page, /currentMarketPrice: componentPrice\.currentMarketPrice,[\s\S]*recentTradePrice: componentPrice\.recentTradePrice/);
+  assert.match(page, /status: product\.status,[\s\S]*statusSource: product\.statusSource,[\s\S]*saleStartAt:[\s\S]*saleEndAt:/);
+  assert.match(page, /mileageMode[\s\S]*includeMileageEarned[\s\S]*showMileage/);
+  assert.match(page, /maple-red-backup-\$\{backupFileTimestamp\(\)\}\.json/);
+  assert.match(page, /application\/json;charset=utf-8/);
+
+  assert.match(page, /parseBackupCandidate\(JSON\.parse\(await file\.text\(\)\)\)[\s\S]*setRestoreCandidate\(candidate\)/);
+  assert.match(page, /value\.backupType === BACKUP_TYPE && value\.schemaVersion === BACKUP_SCHEMA_VERSION/);
+  assert.match(page, /value\.schemaVersion === 0[\s\S]*parseLegacyBackup/);
+  assert.match(page, /이 백업 파일은 현재 버전에서 복원할 수 없습니다\./);
+  assert.match(page, /LEGACY_COMPONENT_NAME_MAP[\s\S]*모험가 캐논슈터 갑옷\(남\)[\s\S]*모험가 캐논슈터 포탄/);
+
+  const restoreStart = page.indexOf("const confirmBackupRestore");
+  const restoreEnd = page.indexOf("const keepRestoredDataLocal", restoreStart);
+  const restoreBody = page.slice(restoreStart, restoreEnd);
+  assert.ok(restoreStart >= 0 && restoreEnd > restoreStart);
+  assert.match(restoreBody, /localStorage\.setItem\(BEFORE_RESTORE_BACKUP_KEY/);
+  assert.ok(restoreBody.indexOf("localStorage.setItem(BEFORE_RESTORE_BACKUP_KEY") < restoreBody.indexOf("setSettings(restoreCandidate.settings)"));
+  assert.doesNotMatch(restoreBody, /saveSharedPayload|uploadCurrentData|queueCloudSave/);
+  assert.match(restoreBody, /setRestoreSharePromptOpen\(true\)/);
+
+  assert.match(page, /이 백업으로 현재 데이터를 복원하시겠습니까\?/);
+  assert.match(page, /백업 생성일[\s\S]*포함 상품[\s\S]*포함 구성품/);
+  assert.match(page, /이 기기에서만 사용/);
+  assert.match(page, /공유 데이터에도 적용/);
+  assert.match(page, /현재 복원된 데이터를 다른 기기에서 사용하는 공유 데이터에도 적용합니다\./);
+  assert.match(page, /requestSharedEdit\(\(\) => \{ void uploadCurrentData\("복원한 데이터를 공유 데이터에도 적용했습니다\."\); \}\)/);
+
+  const backupBuilder = page.slice(page.indexOf("function createLocalBackup"), page.indexOf("function normalizeBackupSettings"));
+  assert.doesNotMatch(backupBuilder, /EDITOR_TOKEN_KEY|mapleRedEditorToken|ADMIN_PIN|SUPABASE|service_role/i);
+  assert.match(css, /\.data-management-row/);
+  assert.match(css, /\.restore-summary/);
 });

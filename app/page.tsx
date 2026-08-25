@@ -88,9 +88,59 @@ type PendingCloudChanges = {
   componentIds: Set<string>;
 };
 
+type BackupProductRecord = {
+  productId: string;
+  name: string;
+  status: ProductStatus;
+  statusSource: ProductStatusSource;
+  saleStartAt: string | null;
+  saleEndAt: string | null;
+  checkedAt: string;
+  priceBasis: PriceBasis;
+  saleLimit: number | null;
+  note: string;
+  updatedAt: string;
+  cashPrice?: number;
+  mileage30Eligible?: boolean;
+  customProduct?: CatalogProduct;
+};
+
+type BackupComponentRecord = ComponentMarketPrice & {
+  componentId: string;
+  productId: string;
+  name: string;
+};
+
+type LocalBackupV1 = {
+  backupType: "maple-red-profit-calculator";
+  schemaVersion: 1;
+  exportedAt: string;
+  settings: Settings;
+  products: Record<string, BackupProductRecord>;
+  components: Record<string, BackupComponentRecord>;
+  planner: {
+    plan: PlanItem[];
+    goalCash: number;
+  };
+};
+
+type RestoreCandidate = {
+  exportedAt: string;
+  settings: Settings;
+  products: CatalogProduct[];
+  priceData: PriceDataMap;
+  plan: PlanItem[];
+  goalCash: number;
+  productCount: number;
+  componentCount: number;
+};
+
 const STORAGE_KEY = "red-work-profit-calculator-v1";
 const STORAGE_VERSION = 9;
 const MILEAGE_RATE = 0.05;
+const BACKUP_TYPE = "maple-red-profit-calculator";
+const BACKUP_SCHEMA_VERSION = 1;
+const BEFORE_RESTORE_BACKUP_KEY = "mapleRedBeforeRestoreBackup_v1";
 
 const EMPTY_CLOUD_META: CloudSyncMeta = {
   version: 1,
@@ -625,6 +675,256 @@ function mergeSharedSnapshot(
   return { settings: nextSettings, products: nextProducts, priceData: nextPriceData, meta: nextMeta };
 }
 
+const LEGACY_COMPONENT_NAME_MAP: Record<string, string> = {
+  "모험가 캐논슈터 슈트(남)": "모험가 캐논슈터 갑옷(남)",
+  "모험가 캐논슈터 슈트(여)": "모험가 캐논슈터 갑옷(여)",
+  "모험가 캐논슈터 캐논": "모험가 캐논슈터 포탄",
+};
+
+function createLocalBackup(
+  settings: Settings,
+  products: CatalogProduct[],
+  priceData: PriceDataMap,
+  plan: PlanItem[],
+  goalCash: number,
+): LocalBackupV1 {
+  const defaultsById = new Map(DEFAULT_PRODUCTS.map((product) => [product.id, product]));
+  const productRecords: Record<string, BackupProductRecord> = {};
+  const componentRecords: Record<string, BackupComponentRecord> = {};
+
+  for (const product of products) {
+    const fallback = defaultsById.get(product.id);
+    const productPrice = getProductPrice(priceData, product);
+    productRecords[product.id] = {
+      productId: product.id,
+      name: product.name,
+      status: product.status,
+      statusSource: product.statusSource,
+      saleStartAt: product.saleStartAt ?? null,
+      saleEndAt: product.saleEndAt ?? null,
+      checkedAt: product.checkedAt,
+      priceBasis: productPrice.priceBasis,
+      saleLimit: productPrice.saleLimit,
+      note: productPrice.note,
+      updatedAt: productPrice.updatedAt,
+      ...(!fallback || product.cashPrice !== fallback.cashPrice ? { cashPrice: product.cashPrice } : {}),
+      ...(!fallback || product.mileage30Eligible !== fallback.mileage30Eligible ? { mileage30Eligible: product.mileage30Eligible } : {}),
+      ...(product.id.startsWith("user-") ? { customProduct: product } : {}),
+    };
+    for (const component of product.components) {
+      const componentPrice = productPrice.componentPrices[component.id] ?? emptyComponentMarketPrice();
+      componentRecords[component.id] = {
+        componentId: component.id,
+        productId: product.id,
+        name: component.name,
+        currentMarketPrice: componentPrice.currentMarketPrice,
+        recentTradePrice: componentPrice.recentTradePrice,
+      };
+    }
+  }
+
+  return {
+    backupType: BACKUP_TYPE,
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    settings: { ...settings },
+    products: productRecords,
+    components: componentRecords,
+    planner: {
+      plan: plan.map((item) => ({ ...item })),
+      goalCash,
+    },
+  };
+}
+
+function normalizeBackupSettings(value: unknown, strict: boolean) {
+  if (!isRecord(value)) return null;
+  const next: Settings = { ...DEFAULT_SETTINGS };
+  const numberKeys: (keyof Pick<Settings, "mesoPrice" | "giftDiscount" | "auctionFee" | "mileageWon">)[] = [
+    "mesoPrice", "giftDiscount", "auctionFee", "mileageWon",
+  ];
+  const booleanKeys: (keyof Pick<Settings, "includeMileageEarned" | "showMileage">)[] = ["includeMileageEarned", "showMileage"];
+  for (const key of numberKeys) {
+    if (!(key in value)) {
+      if (strict) return null;
+      continue;
+    }
+    const setting = value[key];
+    if (typeof setting !== "number" || !Number.isFinite(setting) || setting < 0) return null;
+    if ((key === "giftDiscount" || key === "auctionFee") && setting > 100) return null;
+    next[key] = setting;
+  }
+  for (const key of booleanKeys) {
+    if (!(key in value)) {
+      if (strict) return null;
+      continue;
+    }
+    if (typeof value[key] !== "boolean") return null;
+    next[key] = value[key];
+  }
+  if (!("mileageMode" in value)) {
+    if (strict) return null;
+  } else if (value.mileageMode === "none" || value.mileageMode === "direct") {
+    next.mileageMode = value.mileageMode;
+  } else {
+    return null;
+  }
+  return next;
+}
+
+function validBackupPrice(value: unknown) {
+  return value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+function normalizeBackupPlan(value: unknown, validProductIds: Set<string>) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): PlanItem[] => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.productId !== "string" ||
+      typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity < 0 ||
+      typeof item.useMileage !== "boolean" || !validProductIds.has(item.productId)) return [];
+    return [{ id: item.id, productId: item.productId, quantity: item.quantity, useMileage: item.useMileage }];
+  });
+}
+
+function parseV1Backup(value: Record<string, unknown>): RestoreCandidate {
+  const settings = normalizeBackupSettings(value.settings, true);
+  if (!settings || !isRecord(value.products) || !isRecord(value.components)) throw new Error("invalid");
+
+  const rawProducts = Object.entries(value.products);
+  const customProducts: CatalogProduct[] = [];
+  for (const [productId, rawProduct] of rawProducts) {
+    if (!isRecord(rawProduct) || rawProduct.productId !== productId || typeof rawProduct.name !== "string" ||
+      !isProductStatus(rawProduct.status) || !isProductStatusSource(rawProduct.statusSource) ||
+      (rawProduct.priceBasis !== "current" && rawProduct.priceBasis !== "recent") ||
+      typeof rawProduct.checkedAt !== "string" || typeof rawProduct.note !== "string" || typeof rawProduct.updatedAt !== "string" ||
+      !validBackupPrice(rawProduct.saleLimit) ||
+      (rawProduct.saleStartAt !== null && normalizeSaleDate(rawProduct.saleStartAt) === undefined) ||
+      (rawProduct.saleEndAt !== null && normalizeSaleDate(rawProduct.saleEndAt) === undefined) ||
+      (rawProduct.cashPrice !== undefined && !(typeof rawProduct.cashPrice === "number" && Number.isFinite(rawProduct.cashPrice) && rawProduct.cashPrice >= 0)) ||
+      (rawProduct.mileage30Eligible !== undefined && typeof rawProduct.mileage30Eligible !== "boolean")) throw new Error("invalid");
+    if (rawProduct.customProduct !== undefined) {
+      if (!isRecord(rawProduct.customProduct)) throw new Error("invalid");
+      const customProduct = mergeSavedProduct(rawProduct.customProduct as SavedProductRecord);
+      if (!customProduct || customProduct.id !== productId || !productId.startsWith("user-")) throw new Error("invalid");
+      customProducts.push(customProduct);
+    }
+  }
+
+  let restoredProducts = migrateCatalogProducts(STORAGE_VERSION, [...DEFAULT_PRODUCTS, ...customProducts]);
+  const recordsById = new Map(rawProducts.map(([id, record]) => [id, record as Record<string, unknown>]));
+  restoredProducts = restoredProducts.map((product) => {
+    const record = recordsById.get(product.id);
+    if (!record) return product;
+    return {
+      ...product,
+      status: record.status as ProductStatus,
+      statusSource: record.statusSource as ProductStatusSource,
+      saleStartAt: normalizeSaleDate(record.saleStartAt),
+      saleEndAt: normalizeSaleDate(record.saleEndAt),
+      checkedAt: record.checkedAt as string,
+      cashPrice: typeof record.cashPrice === "number" ? record.cashPrice : product.cashPrice,
+      mileage30Eligible: typeof record.mileage30Eligible === "boolean" ? record.mileage30Eligible : product.mileage30Eligible,
+    };
+  });
+
+  const restoredPriceData = createInitialPriceData(restoredProducts);
+  for (const product of restoredProducts) {
+    const record = recordsById.get(product.id);
+    if (!record) continue;
+    restoredPriceData[product.id] = {
+      ...restoredPriceData[product.id],
+      priceBasis: record.priceBasis as PriceBasis,
+      saleLimit: normalizeNullableNumber(record.saleLimit),
+      note: record.note as string,
+      updatedAt: record.updatedAt as string,
+    };
+  }
+
+  const componentOwners = new Map<string, { productId: string; componentId: string }>();
+  for (const product of restoredProducts) {
+    for (const component of product.components) componentOwners.set(component.id, { productId: product.id, componentId: component.id });
+  }
+  const rawComponents = Object.entries(value.components);
+  for (const [componentId, rawComponent] of rawComponents) {
+    if (!isRecord(rawComponent) || rawComponent.componentId !== componentId || typeof rawComponent.productId !== "string" ||
+      typeof rawComponent.name !== "string" || !validBackupPrice(rawComponent.currentMarketPrice) || !validBackupPrice(rawComponent.recentTradePrice)) {
+      throw new Error("invalid");
+    }
+    let owner = componentOwners.get(componentId);
+    if (!owner) {
+      const product = restoredProducts.find((candidate) => candidate.id === rawComponent.productId);
+      const migratedName = LEGACY_COMPONENT_NAME_MAP[rawComponent.name] ?? rawComponent.name;
+      const component = product?.components.find((candidate) => candidate.name === migratedName);
+      if (product && component) owner = { productId: product.id, componentId: component.id };
+    }
+    if (!owner) continue;
+    const productPrice = restoredPriceData[owner.productId];
+    productPrice.componentPrices[owner.componentId] = {
+      currentMarketPrice: normalizeNullableNumber(rawComponent.currentMarketPrice),
+      recentTradePrice: normalizeNullableNumber(rawComponent.recentTradePrice),
+    };
+  }
+
+  const planner = isRecord(value.planner) ? value.planner : {};
+  const validProductIds = new Set(restoredProducts.map((product) => product.id));
+  const goalCash = typeof planner.goalCash === "number" && Number.isFinite(planner.goalCash) && planner.goalCash >= 0
+    ? planner.goalCash
+    : 1500000;
+  return {
+    exportedAt: typeof value.exportedAt === "string" ? value.exportedAt : "",
+    settings,
+    products: restoredProducts,
+    priceData: restoredPriceData,
+    plan: normalizeBackupPlan(planner.plan, validProductIds),
+    goalCash,
+    productCount: rawProducts.length,
+    componentCount: rawComponents.length,
+  };
+}
+
+function parseLegacyBackup(value: Record<string, unknown>): RestoreCandidate {
+  const legacyVersion = typeof value.version === "number" ? value.version : 1;
+  if (!Number.isInteger(legacyVersion) || legacyVersion < 1 || !Array.isArray(value.products)) throw new Error("unsupported");
+  const settings = normalizeBackupSettings(value.settings, false);
+  if (!settings) throw new Error("invalid");
+  const products = migrateCatalogProducts(legacyVersion, value.products);
+  const priceData = legacyVersion >= 2
+    ? normalizePriceData(products, isRecord(value.priceData) ? value.priceData as PriceDataMap : undefined)
+    : migrateLegacyPriceData(products, value.products);
+  const validProductIds = new Set(products.map((product) => product.id));
+  return {
+    exportedAt: typeof value.exportedAt === "string" ? value.exportedAt : "",
+    settings,
+    products,
+    priceData,
+    plan: normalizeBackupPlan(value.plan, validProductIds),
+    goalCash: typeof value.goalCash === "number" && Number.isFinite(value.goalCash) && value.goalCash >= 0 ? value.goalCash : 1500000,
+    productCount: products.length,
+    componentCount: products.reduce((total, product) => total + product.components.length, 0),
+  };
+}
+
+function parseBackupCandidate(value: unknown): RestoreCandidate {
+  if (!isRecord(value)) throw new Error("invalid");
+  if ("backupType" in value && value.backupType !== BACKUP_TYPE) throw new Error("invalid");
+  if (value.backupType === BACKUP_TYPE && value.schemaVersion === BACKUP_SCHEMA_VERSION) return parseV1Backup(value);
+  if ((value.backupType === BACKUP_TYPE && value.schemaVersion === 0) || (!("backupType" in value) && typeof value.version === "number")) {
+    return parseLegacyBackup(value);
+  }
+  throw new Error("unsupported");
+}
+
+function backupFileTimestamp(date = new Date()) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+    "-",
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+  ].join("");
+}
+
 function componentPriceForBasis(price: ComponentMarketPrice, basis: PriceBasis) {
   if (basis === "recent") return price.recentTradePrice ?? 0;
   return price.currentMarketPrice ?? 0;
@@ -779,6 +1079,9 @@ export default function Home() {
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinSubmitting, setPinSubmitting] = useState(false);
+  const [restoreCandidate, setRestoreCandidate] = useState<RestoreCandidate | null>(null);
+  const [restoreSharePromptOpen, setRestoreSharePromptOpen] = useState(false);
+  const [restoreCloudConfirmOpen, setRestoreCloudConfirmOpen] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef(settings);
   const productsRef = useRef(products);
@@ -962,6 +1265,9 @@ export default function Home() {
         setPinValue("");
         setPinError("");
         pendingEditRef.current = null;
+        setRestoreCandidate(null);
+        setRestoreSharePromptOpen(false);
+        setRestoreCloudConfirmOpen(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -1246,7 +1552,7 @@ export default function Home() {
     setNotice("클라우드에 연결할 수 없어 이 기기에만 저장했습니다.");
   };
 
-  const uploadCurrentData = async () => {
+  const uploadCurrentData = async (successMessage = "현재 데이터로 공유를 시작했습니다.") => {
     const token = window.localStorage.getItem(EDITOR_TOKEN_KEY);
     if (!token) {
       setCloudStatus("permission");
@@ -1276,7 +1582,7 @@ export default function Home() {
       persistCloudMeta(completedMeta);
       setNeedsCloudMigration(false);
       setCloudStatus("synced");
-      setNotice("현재 데이터로 공유를 시작했습니다.");
+      setNotice(successMessage);
     } catch (error) {
       if (error instanceof CloudRequestError && [401, 403].includes(error.status ?? 0)) {
         window.localStorage.removeItem(EDITOR_TOKEN_KEY);
@@ -1459,45 +1765,83 @@ export default function Home() {
     setPlan((current) => current.map((item) => (item.id === id ? { ...item, ...changes } : item)));
   };
 
-  const exportData = () => {
-    const payload = JSON.stringify({ version: STORAGE_VERSION, exportedAt: new Date().toISOString(), settings, products, priceData, plan, goalCash }, null, 2);
-    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  const saveBackupFile = () => {
+    const backup = createLocalBackup(settings, products, priceData, plan, goalCash);
+    const payload = JSON.stringify(backup, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: "application/json;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `레드작-계산기-백업-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `maple-red-backup-${backupFileTimestamp()}.json`;
     anchor.click();
-    URL.revokeObjectURL(url);
-    setNotice("JSON 백업 파일을 만들었어요.");
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setNotice("백업 파일을 저장했습니다.");
   };
 
-  const importData = async (event: ChangeEvent<HTMLInputElement>) => {
+  const selectBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text());
-      if (!parsed.settings || !Array.isArray(parsed.products)) throw new Error("invalid");
-      const importedProducts = migrateCatalogProducts(parsed.version, parsed.products);
-      setSettings({ ...DEFAULT_SETTINGS, ...parsed.settings });
-      setProducts(importedProducts);
-      setPriceData(parsed.version >= 2
-        ? normalizePriceData(importedProducts, parsed.priceData)
-        : migrateLegacyPriceData(importedProducts, parsed.products));
-      const validIds = new Set(importedProducts.map((item) => item.id));
-      setPlan(Array.isArray(parsed.plan) ? parsed.plan.filter((item: PlanItem) => validIds.has(item.productId)) : []);
-      setGoalCash(typeof parsed.goalCash === "number" ? parsed.goalCash : 1500000);
-      if (cloudConfigured) {
-        const nextMeta = { ...cloudMetaRef.current, pendingFullUpload: true };
-        persistCloudMeta(nextMeta);
-        setNeedsCloudMigration(true);
-        setCloudStatus("migration");
-        setNotice("백업 데이터를 불러왔어요. 확인 후 공유 데이터에 반영할 수 있습니다.");
-      } else {
-        setNotice("백업 데이터를 불러왔어요.");
-      }
-    } catch {
-      setNotice("올바른 계산기 JSON 파일이 아니에요.");
+      const candidate = parseBackupCandidate(JSON.parse(await file.text()));
+      setRestoreCandidate(candidate);
+    } catch (error) {
+      setNotice(error instanceof Error && error.message === "unsupported"
+        ? "이 백업 파일은 현재 버전에서 복원할 수 없습니다."
+        : "올바른 계산기 백업 파일이 아닙니다.");
     }
+  };
+
+  const confirmBackupRestore = () => {
+    if (!restoreCandidate) return;
+    const beforeRestore = createLocalBackup(settings, products, priceData, plan, goalCash);
+    window.localStorage.setItem(BEFORE_RESTORE_BACKUP_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      backup: beforeRestore,
+    }));
+
+    if (cloudSaveTimerRef.current) {
+      window.clearTimeout(cloudSaveTimerRef.current);
+      cloudSaveTimerRef.current = null;
+    }
+    pendingCloudChangesRef.current = { settings: false, productIds: new Set(), componentIds: new Set() };
+    pendingEditRef.current = null;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: STORAGE_VERSION,
+      settings: restoreCandidate.settings,
+      products: restoreCandidate.products,
+      priceData: restoreCandidate.priceData,
+      plan: restoreCandidate.plan,
+      goalCash: restoreCandidate.goalCash,
+    }));
+
+    settingsRef.current = restoreCandidate.settings;
+    productsRef.current = restoreCandidate.products;
+    priceDataRef.current = restoreCandidate.priceData;
+    setSettings(restoreCandidate.settings);
+    setProducts(restoreCandidate.products);
+    setPriceData(restoreCandidate.priceData);
+    setPlan(restoreCandidate.plan);
+    setGoalCash(restoreCandidate.goalCash);
+    setRestoreCandidate(null);
+
+    if (cloudConfigured) {
+      const nextMeta = { ...cloudMetaRef.current, pendingFullUpload: true };
+      persistCloudMeta(nextMeta);
+      setNeedsCloudMigration(true);
+      setCloudStatus("migration");
+      setRestoreSharePromptOpen(true);
+    }
+    setNotice("백업 데이터를 복원했습니다.");
+  };
+
+  const keepRestoredDataLocal = () => {
+    setRestoreSharePromptOpen(false);
+    setNotice("백업 데이터를 복원했습니다.");
+  };
+
+  const uploadRestoredData = () => {
+    setRestoreCloudConfirmOpen(false);
+    requestSharedEdit(() => { void uploadCurrentData("복원한 데이터를 공유 데이터에도 적용했습니다."); });
   };
 
   const availableSubcategories = categoryFilter === "all" ? [] : SUBCATEGORY_OPTIONS[categoryFilter];
@@ -1541,9 +1885,6 @@ export default function Home() {
         </nav>
         <div className="top-actions">
           <span className={`save-state cloud-state cloud-${cloudStatus}`}><i aria-hidden="true" /> {cloudStatusText[cloudStatus]}{cloudConfigured && <small>{editorAccessText}</small>}</span>
-          <button className="text-button" type="button" onClick={exportData}>내보내기</button>
-          <button className="text-button" type="button" onClick={() => importRef.current?.click()}>가져오기</button>
-          <input ref={importRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={importData} />
         </div>
       </header>
 
@@ -1607,6 +1948,14 @@ export default function Home() {
               <button className="secondary-button" type="button" onClick={startCloudMigration}>현재 데이터로 공유 시작</button>
             </div>
           )}
+          <div className="data-management-row">
+            <span><strong>PC 백업 파일</strong><small>현재 계산 데이터를 JSON 파일로 안전하게 보관하거나 복원합니다.</small></span>
+            <div>
+              <button className="secondary-button" type="button" onClick={saveBackupFile}>백업 파일 저장</button>
+              <button className="secondary-button" type="button" onClick={() => importRef.current?.click()}>백업 파일 복원</button>
+              <input ref={importRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={selectBackupFile} />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1938,6 +2287,56 @@ export default function Home() {
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={() => setEditor(null)}>취소</button>
               <button className="primary-button" type="button" onClick={saveProduct}>저장하기</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {restoreCandidate && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setRestoreCandidate(null)}>
+          <section className="modal restore-modal" role="dialog" aria-modal="true" aria-labelledby="restore-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="백업 복원 확인 닫기" onClick={() => setRestoreCandidate(null)}>×</button>
+            <span className="eyebrow">LOCAL BACKUP</span>
+            <h2 id="restore-confirm-title">이 백업으로 현재 데이터를 복원하시겠습니까?</h2>
+            <p className="modal-lead">복원 직전의 현재 상태는 이 기기의 별도 안전 백업에 먼저 보관됩니다.</p>
+            <dl className="restore-summary">
+              <div><dt>백업 생성일</dt><dd>{restoreCandidate.exportedAt ? formatDate(restoreCandidate.exportedAt) : "미확인"}</dd></div>
+              <div><dt>포함 상품</dt><dd>{formatNumber(restoreCandidate.productCount)}개</dd></div>
+              <div><dt>포함 구성품</dt><dd>{formatNumber(restoreCandidate.componentCount)}개</dd></div>
+            </dl>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setRestoreCandidate(null)}>취소</button>
+              <button className="primary-button" type="button" onClick={confirmBackupRestore}>복원</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {restoreSharePromptOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={keepRestoredDataLocal}>
+          <section className="modal restore-modal" role="dialog" aria-modal="true" aria-labelledby="restore-complete-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="복원 완료 안내 닫기" onClick={keepRestoredDataLocal}>×</button>
+            <span className="eyebrow">RESTORE COMPLETE</span>
+            <h2 id="restore-complete-title">복원이 완료되었습니다.</h2>
+            <p className="modal-lead">현재 기기의 화면과 localStorage에만 반영되었습니다. 공유 데이터는 아직 변경하지 않았습니다.</p>
+            <div className="modal-actions restore-choice-actions">
+              <button className="secondary-button" type="button" onClick={keepRestoredDataLocal}>이 기기에서만 사용</button>
+              <button className="primary-button" type="button" onClick={() => { setRestoreSharePromptOpen(false); setRestoreCloudConfirmOpen(true); }}>공유 데이터에도 적용</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {restoreCloudConfirmOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setRestoreCloudConfirmOpen(false)}>
+          <section className="modal restore-modal" role="alertdialog" aria-modal="true" aria-labelledby="restore-cloud-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" aria-label="공유 데이터 업데이트 확인 닫기" onClick={() => setRestoreCloudConfirmOpen(false)}>×</button>
+            <span className="eyebrow">SHARED DATA</span>
+            <h2 id="restore-cloud-title">공유 데이터도 업데이트할까요?</h2>
+            <p className="modal-lead">현재 복원된 데이터를 다른 기기에서 사용하는 공유 데이터에도 적용합니다.</p>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={() => setRestoreCloudConfirmOpen(false)}>취소</button>
+              <button className="primary-button" type="button" onClick={uploadRestoredData}>공유 데이터 업데이트</button>
             </div>
           </section>
         </div>
