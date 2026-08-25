@@ -1295,16 +1295,26 @@ footer > small,
 .product-accordion-card {
   padding: 0;
   overflow: hidden;
+  border-radius: 13px;
+  box-shadow: none;
   transition: border-color .16s ease, box-shadow .16s ease;
 }
 .product-accordion-card.expanded { border-color: #d6c7b9; box-shadow: 0 8px 22px rgba(85, 68, 58, .07); }
+.desktop-product-table { display: none; }
+.product-card-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
 .product-card-toggle {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 12px;
+  min-height: 76px;
+  grid-template-columns: 44px minmax(260px, 1fr) 90px 110px 110px 180px 28px;
+  grid-template-areas: "rank identity cash sale net efficiency chevron";
+  gap: 10px;
   align-items: center;
-  padding: 15px 16px 9px;
+  padding: 10px 14px;
   border: 0;
   color: inherit;
   background: transparent;
@@ -1312,46 +1322,75 @@ footer > small,
 }
 .product-card-toggle:hover { background: #fcfaf6; }
 .product-card-toggle:focus-visible { outline: 2px solid #9a7448; outline-offset: -2px; }
-.card-product-identity { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: baseline; }
-.card-product-name { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px; align-items: center; }
-.card-product-name > strong { min-width: 0; font-size: 16px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
-.card-product-name .sale-state { min-height: 20px; padding: 3px 6px; font-size: 12px; line-height: 1.1; }
-.card-primary-efficiency { display: grid; justify-items: end; }
-.card-primary-efficiency > small { color: var(--muted); font-size: 12px; }
-.card-primary-efficiency > strong { margin-top: 2px; color: #4a3b31; font-size: 19px; font-weight: 700; white-space: nowrap; }
-.card-primary-efficiency > em { margin-top: 2px; font-size: 12px; font-style: normal; font-weight: 600; white-space: nowrap; }
-.card-primary-efficiency > em.positive { color: #9a7448; }
-.card-primary-efficiency > em.negative { color: #a15c5c; }
-.card-primary-efficiency > em.neutral { color: #7e746c; }
-.product-card-toggle > .chevron { color: #765e4b; }
-.product-card-chip-row {
+.product-card-toggle > .card-rank {
+  grid-area: rank;
+  align-self: center;
+  min-width: 0;
+  padding: 0;
+  color: #9a7448;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.card-product-main {
+  display: flex;
+  grid-area: identity;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  align-items: center;
+}
+.card-product-name { display: flex; min-width: 0; align-items: center; }
+.card-product-name > strong { min-width: 0; font-size: 15px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.card-product-tags {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
-  padding: 0 16px 9px 53px;
 }
-.product-card-chip-row .category-badge,
-.product-card-chip-row .subcategory-badge,
-.product-card-chip-row .sale-state,
-.product-card-chip-row .yes-chip,
-.product-card-chip-row .no-chip,
-.package-count { min-height: 22px; padding: 3px 6px; font-size: 12px; line-height: 1.15; }
+.card-product-tags .category-badge,
+.card-product-tags .subcategory-badge,
+.card-product-tags .sale-state,
+.card-product-tags .yes-chip,
+.card-product-tags .no-chip,
+.card-product-tags .package-count { min-height: 22px; padding: 3px 6px; font-size: 12px; line-height: 1.1; white-space: nowrap; }
 .package-count { display: inline-flex; align-items: center; border-radius: 999px; color: #7e746c; background: #f1ede8; font-weight: 600; }
-.product-card-summary {
+.card-row-metric,
+.card-primary-efficiency {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 0 16px 13px;
-  border-top: 1px solid #eee8e2;
+  min-width: 0;
+  gap: 3px;
+  align-content: center;
 }
-.product-card-summary > div { min-width: 0; padding: 8px 8px 0 0; }
-.product-card-summary dt { color: var(--muted); font-size: 12px; }
-.product-card-summary dd { margin: 3px 0 0; color: #55443a; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.card-row-metric > small,
+.card-primary-efficiency > small { color: var(--muted); font-size: 11px; line-height: 1.2; }
+.card-row-metric > strong { color: #55443a; font-size: 14px; font-weight: 650; line-height: 1.25; white-space: nowrap; }
+.card-cash-price { grid-area: cash; }
+.card-sale-price { grid-area: sale; }
+.card-net-meso { grid-area: net; }
+.card-primary-efficiency { grid-area: efficiency; }
+.card-efficiency-value { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+.card-efficiency-value > strong { color: #4a3b31; font-size: 18px; font-weight: 700; line-height: 1.15; white-space: nowrap; }
+.card-efficiency-value > em { font-size: 11px; font-style: normal; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.card-efficiency-value > em.positive { color: #9a7448; }
+.card-efficiency-value > em.negative { color: #a15c5c; }
+.card-efficiency-value > em.neutral { color: #7e746c; }
+.product-card-toggle > .chevron { grid-area: chevron; color: #765e4b; text-align: center; }
 .mobile-accordion-panel { padding: 16px; border-top: 1px solid #e5ddd5; }
 
 @media (max-width: 1199px) {
   .product-card-list { align-items: start; }
+  .product-card-toggle {
+    min-height: 90px;
+    grid-template-columns: 36px repeat(4, minmax(0, 1fr)) 28px;
+    grid-template-areas:
+      "rank identity identity identity identity chevron"
+      ". cash sale net efficiency .";
+    gap: 7px 10px;
+    padding: 10px 13px;
+  }
   .accordion-detail-topline,
   .accordion-meta-actions { align-items: stretch; flex-direction: column; }
   .accordion-basis-select { min-width: 0; }
@@ -1363,16 +1402,29 @@ footer > small,
 }
 
 @media (max-width: 767px) {
-  .product-card-toggle { gap: 7px; padding: 10px 13px 6px; }
-  .card-product-identity { gap: 7px; }
+  .product-card-toggle {
+    min-height: 100px;
+    grid-template-columns: 28px repeat(4, minmax(0, 1fr)) 22px;
+    gap: 8px 5px;
+    padding: 10px;
+  }
+  .card-product-main { gap: 4px 6px; }
   .card-product-name > strong { font-size: 15px; }
-  .card-primary-efficiency { grid-template-columns: auto auto; gap: 5px; align-items: baseline; }
-  .card-primary-efficiency > small { display: none; }
-  .card-primary-efficiency > strong { margin-top: 0; font-size: 18px; }
-  .card-primary-efficiency > em { margin-top: 0; font-size: 11px; white-space: nowrap; }
-  .product-card-chip-row { padding: 0 13px 6px 42px; }
-  .product-card-summary { margin: 0 13px 8px; }
-  .product-card-summary > div { padding-top: 6px; }
+  .card-product-tags { gap: 3px; }
+  .card-product-tags .category-badge,
+  .card-product-tags .subcategory-badge,
+  .card-product-tags .sale-state,
+  .card-product-tags .yes-chip,
+  .card-product-tags .no-chip,
+  .card-product-tags .package-count { min-height: 20px; padding: 2px 5px; font-size: 11px; }
+  .card-row-metric,
+  .card-primary-efficiency { gap: 2px; }
+  .card-row-metric > small,
+  .card-primary-efficiency > small { font-size: 10px; }
+  .card-row-metric > strong { font-size: 13px; }
+  .card-efficiency-value { flex-wrap: wrap; gap: 2px 4px; }
+  .card-efficiency-value > strong { font-size: 15px; }
+  .card-efficiency-value > em { font-size: 10px; }
   .mobile-accordion-panel { padding: 14px 13px; }
   .accordion-detail-topline,
   .accordion-price-heading { align-items: stretch; flex-direction: column; gap: 9px; }
@@ -1391,8 +1443,12 @@ footer > small,
 }
 
 @media (max-width: 420px) {
-  .product-card-toggle { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .card-primary-efficiency > em { max-width: none; white-space: nowrap; text-align: right; }
+  .product-card-toggle { grid-template-columns: 25px repeat(4, minmax(0, 1fr)) 19px; gap-inline: 3px; padding-inline: 8px; }
+  .card-row-metric > small,
+  .card-primary-efficiency > small { font-size: 9px; }
+  .card-row-metric > strong { font-size: 12px; }
+  .card-efficiency-value > strong { font-size: 14px; }
+  .card-efficiency-value > em { max-width: 100%; font-size: 9px; white-space: normal; }
   .accordion-result-strip { grid-template-columns: 1fr; }
 }
 

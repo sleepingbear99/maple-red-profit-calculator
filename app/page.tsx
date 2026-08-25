@@ -1218,27 +1218,37 @@ function ProductCard({
   return (
     <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"}`}>
       <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
-        <span className="card-product-identity">
-          <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
-          <span className="card-product-name"><strong>{product.name}</strong><ProductStatusBadge product={product} /></span>
+        <span className="card-rank">{hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
+        <span className="card-product-main">
+          <span className="card-product-name"><strong>{product.name}</strong></span>
+          <span className="card-product-tags">
+            <CategoryBadges product={product} />
+            <ProductStatusBadge product={product} />
+            {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30</span> : <span className="no-chip">마일 불가</span>}
+            {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}</span>}
+          </span>
+        </span>
+        <span className="card-row-metric card-cash-price">
+          <small>캐시</small>
+          <strong>{isReference ? "—" : formatNumber(product.cashPrice)}</strong>
+        </span>
+        <span className="card-row-metric card-sale-price">
+          <small>판매 기준가</small>
+          <strong>{formatOptionalEok(base.salePrice)}</strong>
+        </span>
+        <span className="card-row-metric card-net-meso">
+          <small>실수령</small>
+          <strong>{formatOptionalEok(base.netMeso)}</strong>
         </span>
         <span className="card-primary-efficiency">
           <small>1억당 현금</small>
-          <strong>{formatWon(base.primaryPerEok)}</strong>
-          <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
+          <span className="card-efficiency-value">
+            <strong>{formatWon(base.primaryPerEok)}</strong>
+            <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
+          </span>
         </span>
         <span className="chevron" aria-hidden="true">⌄</span>
       </button>
-      <div className="product-card-chip-row">
-        <CategoryBadges product={product} />
-        {isReference ? <span className="no-chip">참고 품목</span> : product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
-        {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
-      </div>
-      <dl className="product-card-summary">
-        <div><dt>캐시</dt><dd>{isReference ? "—" : formatNumber(product.cashPrice)}</dd></div>
-        <div><dt>판매 기준가</dt><dd>{formatOptionalEok(base.salePrice)}</dd></div>
-        <div><dt>실수령 메소</dt><dd>{formatOptionalEok(base.netMeso)}</dd></div>
-      </dl>
       {expanded && (
         <div className="product-accordion-panel mobile-accordion-panel" id={panelId}>
           <ProductAccordionDetails
