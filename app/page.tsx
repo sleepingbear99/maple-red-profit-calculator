@@ -1289,7 +1289,9 @@ function ProductAccordionDetails({
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const [showPriceEditor, setShowPriceEditor] = useState(false);
+  const [showSaleEditor, setShowSaleEditor] = useState(false);
   const priceEditorId = useId();
+  const saleEditorId = useId();
 
   return (
     <div className="accordion-detail-content">
@@ -1318,39 +1320,24 @@ function ProductAccordionDetails({
         </div>
       )}
 
-      <section className="accordion-sale-editor" aria-label={`${product.name} 판매 상태 편집`}>
-        <div className="accordion-sale-heading">
-          <strong>판매 상태</strong>
-          <span className="effective-status">현재 적용: <ProductStatusBadge product={product} showActive /></span>
-        </div>
-        <div className="accordion-sale-grid">
-          <label>
-            <span>판매 상태</span>
-            <select value={product.status} onChange={(event) => onProductChange({ status: event.target.value as ProductStatus, statusSource: "manual" })}>
-              {PRODUCT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>상태 적용 방식</span>
-            <select value={product.statusSource} onChange={(event) => onProductChange({ statusSource: event.target.value as ProductStatusSource })}>
-              <option value="manual">직접 지정</option>
-              <option value="automatic">판매 기간으로 자동</option>
-            </select>
-          </label>
-          <label>
-            <span>판매 시작일</span>
-            <input type="date" value={product.saleStartAt ?? ""} max={product.saleEndAt} onChange={(event) => onProductChange({ saleStartAt: event.target.value || undefined })} />
-          </label>
-          <label>
-            <span>판매 종료일</span>
-            <input type="date" value={product.saleEndAt ?? ""} min={product.saleStartAt} onChange={(event) => onProductChange({ saleEndAt: event.target.value || undefined })} />
-          </label>
-        </div>
-      </section>
-
       {isReference && (
         <div className="reference-detail-note compact"><strong>마일리지 참고 품목</strong><p>일반 판매효율 순위와 손익 계산에는 포함되지 않습니다.</p></div>
       )}
+
+      <div className="accordion-meta-actions">
+        <div className="accordion-meta">
+          <span>판매 스냅샷 {product.checkedAt}</span>
+          {!isReference && <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>}
+          {!isReference && <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>}
+          {settings.showMileage && mileage && <span>마일30 {formatWon(mileage.primaryPerEok)} · {formatNumber(mileage.mileageUsed)} 마일 필요</span>}
+          {priceData.note && <span>메모 · {priceData.note}</span>}
+        </div>
+        <div className="accordion-actions">
+          <button className="secondary-button" type="button" onClick={onDetail}>상세 계산 보기</button>
+          {!isReference && <button className="primary-button" type="button" aria-expanded={showPriceEditor} aria-controls={priceEditorId} onClick={() => setShowPriceEditor((current) => !current)}>{showPriceEditor ? "상품가격 편집 닫기" : "상품가격 전체 편집"}</button>}
+          <button className="secondary-button" type="button" aria-expanded={showSaleEditor} aria-controls={saleEditorId} onClick={() => setShowSaleEditor((current) => !current)}>{showSaleEditor ? "판매 상태 닫기" : "판매 상태 편집"}</button>
+        </div>
+      </div>
 
       {!isReference && showPriceEditor && (
         <section className="accordion-price-editor" id={priceEditorId} aria-label={`${product.name} 구성품별 가격 입력`}>
@@ -1380,19 +1367,34 @@ function ProductAccordionDetails({
         </section>
       )}
 
-      <div className="accordion-meta-actions">
-        <div className="accordion-meta">
-          <span>판매 스냅샷 {product.checkedAt}</span>
-          {!isReference && <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>}
-          {!isReference && <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>}
-          {settings.showMileage && mileage && <span>마일30 {formatWon(mileage.primaryPerEok)} · {formatNumber(mileage.mileageUsed)} 마일 필요</span>}
-          {priceData.note && <span>메모 · {priceData.note}</span>}
-        </div>
-        <div className="accordion-actions">
-          <button className="secondary-button" type="button" onClick={onDetail}>상세 계산 보기</button>
-          {!isReference && <button className="primary-button" type="button" aria-expanded={showPriceEditor} aria-controls={priceEditorId} onClick={() => setShowPriceEditor((current) => !current)}>{showPriceEditor ? "상품가격 편집 닫기" : "상품가격 전체 편집"}</button>}
-        </div>
-      </div>
+      {showSaleEditor && (
+        <section className="accordion-sale-editor" id={saleEditorId} aria-label={`${product.name} 판매 상태 편집`}>
+          <div className="accordion-sale-heading"><strong>판매 상태 편집</strong></div>
+          <div className="accordion-sale-grid">
+            <label>
+              <span>판매 상태</span>
+              <select value={product.status} onChange={(event) => onProductChange({ status: event.target.value as ProductStatus, statusSource: "manual" })}>
+                {PRODUCT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>상태 적용 방식</span>
+              <select value={product.statusSource} onChange={(event) => onProductChange({ statusSource: event.target.value as ProductStatusSource })}>
+                <option value="manual">직접 지정</option>
+                <option value="automatic">판매 기간으로 자동</option>
+              </select>
+            </label>
+            <label>
+              <span>판매 시작일</span>
+              <input type="date" value={product.saleStartAt ?? ""} max={product.saleEndAt} onChange={(event) => onProductChange({ saleStartAt: event.target.value || undefined })} />
+            </label>
+            <label>
+              <span>판매 종료일</span>
+              <input type="date" value={product.saleEndAt ?? ""} min={product.saleStartAt} onChange={(event) => onProductChange({ saleEndAt: event.target.value || undefined })} />
+            </label>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

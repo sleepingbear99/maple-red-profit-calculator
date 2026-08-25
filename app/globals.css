@@ -1286,10 +1286,30 @@ footer > small,
 .accordion-component-inputs .affix-input input { min-width: 0; width: 100%; height: 100%; padding: 7px 4px 7px 9px; font-size: 16px; font-weight: 600; text-align: right; }
 .accordion-component-inputs .affix-input small { position: static; flex: 0 0 auto; padding: 0 9px 0 4px; color: var(--muted); font-size: 13px; font-weight: 400; line-height: 40px; white-space: nowrap; }
 .accordion-meta-actions { align-items: center; margin-top: 15px; }
-.accordion-meta { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.accordion-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.accordion-meta { display: flex; min-width: 0; flex: 1 1 360px; flex-wrap: wrap; gap: 5px 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.accordion-actions { display: flex; min-width: 480px; max-width: 600px; flex: 1 1 520px; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .accordion-actions .primary-button,
-.accordion-actions .secondary-button { width: auto; padding: 10px 13px; }
+.accordion-actions .secondary-button {
+  min-width: 145px;
+  width: auto;
+  flex: 1 1 0;
+  padding: 10px 13px;
+  box-shadow: none;
+}
+.accordion-actions .primary-button {
+  border-color: #806753;
+  color: #fff;
+  background: #806753;
+}
+.accordion-actions .primary-button:hover { border-color: #6f5847; background: #6f5847; }
+.accordion-actions .secondary-button {
+  border-color: #e7d8c6;
+  color: #6f5a46;
+  background: #fffdf9;
+}
+.accordion-actions .secondary-button:hover { border-color: #d9c5ad; color: #604b39; background: #f1e5d6; }
+.accordion-actions .primary-button:focus-visible,
+.accordion-actions .secondary-button:focus-visible { outline: 2px solid #9a7448; outline-offset: 2px; }
 .reference-detail-note.compact { margin-top: 16px; }
 
 .product-accordion-card {
@@ -1436,7 +1456,7 @@ footer > small,
   .accordion-basis-select { min-width: 0; }
   .accordion-result-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .component-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .accordion-actions { justify-content: stretch; }
+  .accordion-actions { min-width: 0; width: 100%; max-width: none; flex-basis: auto; justify-content: stretch; }
   .accordion-actions button { flex: 1 1 150px; }
   .accordion-sale-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

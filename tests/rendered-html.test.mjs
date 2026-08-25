@@ -86,4 +86,11 @@ test("separates the ranking list from the component price grid", async () => {
   assert.match(css, /\.card-row-metric > strong\s*\{[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap;/s);
   assert.match(css, /\.card-efficiency-value > em\s*\{[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap;/s);
   assert.doesNotMatch(css, /\.card-efficiency-value > em\s*\{[^}]*white-space:\s*normal;/s);
+  assert.match(page, /const \[showSaleEditor, setShowSaleEditor\] = useState\(false\)/);
+  assert.match(page, /\{showSaleEditor && \(\s*<section className="accordion-sale-editor"/s);
+  assert.match(page, /aria-expanded=\{showSaleEditor\}/);
+  assert.match(page, /showSaleEditor \? "판매 상태 닫기" : "판매 상태 편집"/);
+  assert.doesNotMatch(page, /현재 적용:/);
+  assert.match(css, /\.accordion-actions \.primary-button\s*\{[^}]*background:\s*#806753;/s);
+  assert.match(css, /\.accordion-actions \.secondary-button\s*\{[^}]*background:\s*#fffdf9;/s);
 });
