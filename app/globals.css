@@ -906,7 +906,8 @@ footer > small,
 
 .category-badges { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .category-badge,
-.subcategory-badge {
+.subcategory-badge,
+.product-tag-badge {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -919,11 +920,11 @@ footer > small,
 }
 .category-basic { color: #6f6259; background: #f0ece8; }
 .category-random { color: #806b8f; background: #f2edf4; }
-.category-bundle { color: #8c6a46; background: #f7efe3; }
 .category-coupon { color: #a15c5c; background: #f8eded; }
 .category-job { color: #66758c; background: #edf0f5; }
 .category-boss { color: #8c6a46; background: #f5ead4; }
 .subcategory-badge { border: 1px solid #e3ded5; color: #7e746c; background: #fff; }
+.product-tag-badge { border: 1px solid #ead9c3; color: #8c6a46; background: #faf3e8; }
 
 .desktop-product-table { display: block; overflow: visible; }
 .desktop-product-table .table-scroll { overflow-x: auto; border-radius: inherit; }
@@ -1089,7 +1090,8 @@ footer > small,
   .product-card-metrics { grid-template-columns: 1fr; }
   .product-card-header { gap: 8px; }
   .category-badge,
-  .subcategory-badge { font-size: 13px; }
+  .subcategory-badge,
+  .product-tag-badge { font-size: 13px; }
 }
 
 /* Avoid scrollbar-width overflow from the former 100vw full-bleed section. */
@@ -1405,6 +1407,7 @@ footer > small,
 }
 .card-product-tags .category-badge,
 .card-product-tags .subcategory-badge,
+.card-product-tags .product-tag-badge,
 .card-product-tags .sale-state,
 .card-product-tags .yes-chip,
 .card-product-tags .no-chip,
@@ -1514,6 +1517,7 @@ footer > small,
   .card-product-tags { gap: 3px; }
   .card-product-tags .category-badge,
   .card-product-tags .subcategory-badge,
+  .card-product-tags .product-tag-badge,
   .card-product-tags .sale-state,
   .card-product-tags .yes-chip,
   .card-product-tags .no-chip,

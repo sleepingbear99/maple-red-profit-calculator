@@ -118,7 +118,7 @@ test("keeps catalog corrections, mileage comparison, and ended-product ordering"
   assert.match(catalog, /림보 탈/);
   assert.match(catalog, /adventurer-15[^\n]*모험가 나이트로드 헤어밴드\(남\)/);
   assert.match(catalog, /adventurer-16[^\n]*모험가 나이트로드 헤어밴드\(여\)/);
-  assert.match(catalog, /INITIAL_DATA_COUNTS\.currentProducts !== 127/);
+  assert.match(catalog, /INITIAL_DATA_COUNTS\.currentProducts !== 129/);
 
   assert.doesNotMatch(catalog, /"reference"|"mileageReference"|MILEAGE_REFERENCES|붕어빵 뿌리기 11개|달콤한 붕어빵 11개|슈퍼파워버프|마슈르의 선물기상효과/);
   assert.doesNotMatch(page, /"reference"|"mileageReference"|마일리지 참고/);
@@ -139,4 +139,60 @@ test("keeps catalog corrections, mileage comparison, and ended-product ordering"
   assert.match(page, /REQUIRED_BUILT_IN_EXCLUDED_COMPONENT_IDS/);
   assert.match(page, /fallbackComponents\.get\(component\.id\)/);
   assert.match(page, /saved\?\.componentPrices\?\.\[component\.id\]/);
+});
+
+test("uses the simplified catalog taxonomy and preserves legacy saved values", async () => {
+  const [page, catalog, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/product-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  const categoryType = catalog.match(/export type ProductCategory =[\s\S]*?;/)?.[0] ?? "";
+  const subcategoryType = catalog.match(/export type ProductSubcategory =[\s\S]*?;/)?.[0] ?? "";
+  const subcategoryOptions = catalog.match(/export const SUBCATEGORY_OPTIONS[\s\S]*?\n};/)?.[0] ?? "";
+  const categoryFilters = page.match(/const CATEGORY_FILTER_OPTIONS[\s\S]*?\n];/)?.[0] ?? "";
+
+  assert.match(categoryType, /"basic"[\s\S]*"random"[\s\S]*"coupon"[\s\S]*"job"[\s\S]*"boss"/);
+  assert.doesNotMatch(categoryType, /"bundle"|"reference"/);
+  assert.match(subcategoryOptions, /basic: \["utility", "ring", "transferScroll", "prism"\]/);
+  assert.match(subcategoryOptions, /random: \["royal", "lunaCrystal", "wonderberry", "boutique"\]/);
+  assert.match(subcategoryOptions, /coupon: \["hair", "face", "mixCoupon", "genderChange"\]/);
+  assert.doesNotMatch(subcategoryType, /"scroll"|"color"|"crystal"|"gift"|"mixDye"|"mixLens"|"allJob"|"best"/);
+  assert.doesNotMatch(categoryFilters, /"bundle"|"reference"|묶음|마일리지 참고/);
+
+  assert.match(catalog, /product\("basic-07", "컬러링 프리즘 프로", "basic", 25000, \{ subcategory: "prism", mileage30Eligible: true \}\)/);
+  assert.match(catalog, /product\("basic-08", "무기 이펙트 프리즘", "basic", 15000, \{ subcategory: "prism", mileage30Eligible: true \}\)/);
+  assert.match(catalog, /product\("bundle-01", "부티크 기프트", "random", 3300, \{ subcategory: "boutique", status: "ended" \}\)/);
+  assert.match(catalog, /product\("bundle-02", "부티크 기프트 10개", "random", 33000, \{ subcategory: "boutique", tags: \["multiPack"\], status: "ended", components: \[\["부티크 기프트", 10\]\] \}\)/);
+  assert.doesNotMatch(catalog, /뷰티크 기프트/);
+
+  assert.match(catalog, /coupon-03[^\n]*subcategory: "hair"[^\n]*tags: \["best"\]/);
+  assert.match(catalog, /coupon-04[^\n]*subcategory: "face"[^\n]*tags: \["best"\]/);
+  assert.match(catalog, /coupon-05[^\n]*subcategory: "hair"[^\n]*tags: \["boss"\]/);
+  assert.match(catalog, /coupon-09[^\n]*subcategory: "hair"[^\n]*tags: \["allJob", "illustrationCollection"\]/);
+  assert.match(catalog, /coupon-11[^\n]*subcategory: "mixCoupon"/);
+  assert.match(catalog, /coupon-12[^\n]*subcategory: "mixCoupon"/);
+
+  assert.match(catalog, /INITIAL_DATA_COUNTS\.basicProducts !== 8/);
+  assert.match(catalog, /INITIAL_DATA_COUNTS\.randomProducts !== 7/);
+  assert.match(catalog, /INITIAL_DATA_COUNTS\.couponProducts !== 12/);
+  assert.match(catalog, /CURRENT_PRODUCTS\.filter\(\(item\) => item\.mileage30Eligible\)\.length !== 8/);
+  assert.match(page, /const STORAGE_VERSION = 7/);
+  assert.match(page, /bundle: "random"/);
+  assert.match(page, /gift: "boutique"/);
+  assert.match(page, /crystal: "lunaCrystal"/);
+  assert.match(page, /scroll: "transferScroll"/);
+  assert.match(page, /color: "prism"/);
+  assert.match(page, /mixDye: "mixCoupon"/);
+  assert.match(page, /mixLens: "mixCoupon"/);
+  assert.match(page, /category: fallback\.category/);
+  assert.match(page, /subcategory: fallback\.subcategory/);
+  assert.match(page, /RENAMED_BUILT_IN_PRODUCT_IDS/);
+  assert.match(page, /"bundle-01-component-1"/);
+  assert.match(page, /"bundle-02-component-1"/);
+  assert.match(page, /saved\?\.componentPrices\?\.\[component\.id\]/);
+  assert.match(page, /product\.tags\.map\(\(tag\) => PRODUCT_TAG_LABELS\[tag\]\)/);
+  assert.match(css, /\.product-tag-badge/);
+  assert.doesNotMatch(css, /\.category-bundle/);
 });

@@ -5,10 +5,12 @@ import {
   CATEGORY_LABELS,
   CURRENT_PRODUCTS,
   INITIAL_DATA_COUNTS,
+  PRODUCT_TAG_LABELS,
   SUBCATEGORY_LABELS,
   SUBCATEGORY_OPTIONS,
   type CatalogProduct,
   type ProductCategory,
+  type ProductTag,
   type ProductStatus,
   type ProductStatusSource,
   type ProductSubcategory,
@@ -55,7 +57,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 6;
+const STORAGE_VERSION = 7;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -76,6 +78,13 @@ const RENAMED_BUILT_IN_COMPONENT_IDS = new Set([
   "resistance-09-component-4",
   "resistance-10-component-4",
   "boss-22-component-1",
+  "bundle-01-component-1",
+  "bundle-02-component-1",
+]);
+
+const RENAMED_BUILT_IN_PRODUCT_IDS = new Set([
+  "bundle-01",
+  "bundle-02",
 ]);
 
 const REQUIRED_BUILT_IN_EXCLUDED_COMPONENT_IDS = new Set([
@@ -114,6 +123,38 @@ function isProductSubcategory(value: unknown): value is ProductSubcategory {
   return typeof value === "string" && value in SUBCATEGORY_LABELS;
 }
 
+function isProductTag(value: unknown): value is ProductTag {
+  return typeof value === "string" && value in PRODUCT_TAG_LABELS;
+}
+
+const LEGACY_CATEGORY_MAP: Record<string, ProductCategory | undefined> = {
+  bundle: "random",
+};
+
+const LEGACY_SUBCATEGORY_MAP: Record<string, ProductSubcategory | undefined> = {
+  gift: "boutique",
+  multiPack: "boutique",
+  crystal: "lunaCrystal",
+  scroll: "transferScroll",
+  color: "prism",
+  mixDye: "mixCoupon",
+  mixLens: "mixCoupon",
+};
+
+function migrateCategory(value: unknown, fallback?: CatalogProduct): ProductCategory {
+  if (isProductCategory(value)) return value;
+  if (fallback) return fallback.category;
+  if (typeof value === "string" && LEGACY_CATEGORY_MAP[value]) return LEGACY_CATEGORY_MAP[value];
+  return "basic";
+}
+
+function migrateSubcategory(value: unknown, fallback?: CatalogProduct): ProductSubcategory {
+  if (isProductSubcategory(value)) return value;
+  if (fallback?.subcategory) return fallback.subcategory;
+  if (typeof value === "string" && LEGACY_SUBCATEGORY_MAP[value]) return LEGACY_SUBCATEGORY_MAP[value];
+  return "utility";
+}
+
 function normalizeSaleDate(value: unknown) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
 }
@@ -131,14 +172,20 @@ function mergeSavedProduct(item: SavedProductRecord, fallback?: CatalogProduct):
     typeof item.checkedAt !== "string"
   ) return null;
 
+  const tags = Array.from(new Set<ProductTag>([
+    ...(Array.isArray(item.tags) ? item.tags.filter(isProductTag) : fallback?.tags ?? []),
+    ...(item.mileage30Eligible ? ["mileage30" as const] : []),
+  ]));
+
   return {
     ...(fallback ?? {}),
     id: item.id,
     name: item.name,
-    category: isProductCategory(item.category) ? item.category : fallback?.category ?? "basic",
-    subcategory: isProductSubcategory(item.subcategory) ? item.subcategory : fallback?.subcategory ?? "utility",
+    category: migrateCategory(item.category, fallback),
+    subcategory: migrateSubcategory(item.subcategory, fallback),
     cashPrice: item.cashPrice,
     mileage30Eligible: item.mileage30Eligible,
+    tags,
     status: savedStatus(item),
     saleStartAt: normalizeSaleDate(item.saleStartAt),
     saleEndAt: normalizeSaleDate(item.saleEndAt),
@@ -167,7 +214,16 @@ function migrateBuiltInProduct(item: SavedProductRecord, fallback: CatalogProduc
       excludedComponents.push(component);
     }
   }
-  return { ...merged, components, excludedComponents };
+  const tags = Array.from(new Set<ProductTag>([...fallback.tags, ...merged.tags]));
+  return {
+    ...merged,
+    name: RENAMED_BUILT_IN_PRODUCT_IDS.has(merged.id) ? fallback.name : merged.name,
+    category: fallback.category,
+    subcategory: fallback.subcategory,
+    tags,
+    components,
+    excludedComponents,
+  };
 }
 
 function migrateCatalogProducts(_version: unknown, savedProducts: unknown): CatalogProduct[] {
@@ -195,7 +251,6 @@ const CATEGORY_FILTER_OPTIONS: [CategoryFilter, string][] = [
   ["all", "전체"],
   ["basic", "기본"],
   ["random", "확률형"],
-  ["bundle", "묶음"],
   ["coupon", "쿠폰"],
   ["job", "직업 코디"],
   ["boss", "보스 코디"],
@@ -466,6 +521,9 @@ function CategoryBadges({ product }: { product: CatalogProduct }) {
     <span className="category-badges">
       <span className={`category-badge category-${product.category}`}>{CATEGORY_LABELS[product.category]}</span>
       {product.subcategory && <span className="subcategory-badge">{SUBCATEGORY_LABELS[product.subcategory]}</span>}
+      {product.tags.filter((tag) => tag !== "mileage30").map((tag) => (
+        <span className="product-tag-badge" key={tag}>{PRODUCT_TAG_LABELS[tag]}</span>
+      ))}
     </span>
   );
 }
@@ -555,6 +613,7 @@ export default function Home() {
           product.name,
           CATEGORY_LABELS[product.category],
           product.subcategory ? SUBCATEGORY_LABELS[product.subcategory] : "",
+          ...product.tags.map((tag) => PRODUCT_TAG_LABELS[tag]),
           ...product.components.map((component) => component.name),
           ...product.excludedComponents.map((component) => component.name),
         ].join(" ").toLocaleLowerCase("ko-KR");
@@ -693,6 +752,7 @@ export default function Home() {
       subcategory: "utility",
       cashPrice: 0,
       mileage30Eligible: false,
+      tags: [],
       status: "active",
       statusSource: "manual",
       components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
@@ -705,6 +765,7 @@ export default function Home() {
         subcategory: "utility",
         cashPrice: 0,
         mileage30Eligible: false,
+        tags: [],
         status: "active",
         statusSource: "manual",
         components: [{ id: `${id}-component-1`, name: "", quantity: 1 }],
@@ -725,6 +786,10 @@ export default function Home() {
       ...productFields,
       name: productFields.name.trim(),
       subcategory: productFields.subcategory,
+      tags: Array.from(new Set<ProductTag>([
+        ...productFields.tags.filter((tag) => tag !== "mileage30"),
+        ...(productFields.mileage30Eligible ? ["mileage30" as const] : []),
+      ])),
       components: productFields.components.map((component) => ({
         ...component,
         name: component.name.trim() || productFields.name.trim(),
