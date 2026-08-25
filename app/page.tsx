@@ -1867,7 +1867,7 @@ export default function Home() {
     permission: "수정 권한 필요",
     migration: "기존 데이터 보호 중",
   };
-  const editorAccessText = editorAccess === "unlocked" ? "수정 가능" : "조회 전용";
+  const editorAccessText = !cloudConfigured || editorAccess === "unlocked" ? "수정 가능" : "조회 전용";
 
   return (
     <main>
@@ -1883,12 +1883,9 @@ export default function Home() {
           <a href="#products">상품 분석</a>
           <a href="#planner">전체 계산</a>
         </nav>
-        <div className="top-actions">
-          <span className={`save-state cloud-state cloud-${cloudStatus}`}><i aria-hidden="true" /> {cloudStatusText[cloudStatus]}{cloudConfigured && <small>{editorAccessText}</small>}</span>
-        </div>
       </header>
 
-      <section className="intro-grid" id="top">
+      <section className="hero-section" id="top">
         <div className="hero-copy">
           <span className="eyebrow">RED WORK ECONOMY TOOL</span>
           <h1>감이 아닌 숫자로<br />레드작을 결정하세요.</h1>
@@ -1899,24 +1896,24 @@ export default function Home() {
             <span><i>3</i> 직구 대비 손익</span>
           </div>
         </div>
+      </section>
 
-        <div className="settings-card panel">
-          <div className="section-heading">
+      <section className="settings-card panel" aria-labelledby="settings-title">
+        <div className="section-heading">
+          <div>
+            <span className="step">01</span>
             <div>
-              <span className="step">01</span>
-              <div>
-                <p>기본 설정</p>
-                <h2>계산 기준</h2>
-              </div>
+              <p>기본 설정</p>
+              <h2 id="settings-title">계산 기준</h2>
             </div>
-            <span className="quiet">입력 즉시 반영</span>
           </div>
-          <div className="input-grid">
-            <NumberField label="현재 메소 현금 시세" value={settings.mesoPrice} suffix="원 / 1억" onChange={(value) => updateSettings("mesoPrice", value)} />
-            <NumberField label="상품권 할인율" value={settings.giftDiscount} suffix="%" step={0.1} onChange={(value) => updateSettings("giftDiscount", Math.min(value, 100))} />
-            <NumberField label="경매장 수수료" value={settings.auctionFee} suffix="%" step={0.1} onChange={(value) => updateSettings("auctionFee", Math.min(value, 100))} />
-          </div>
-          <div className="settings-options">
+          <span className="quiet">입력 즉시 반영</span>
+        </div>
+        <div className="settings-grid">
+          <NumberField label="현재 메소 현금 시세" value={settings.mesoPrice} suffix="원 / 1억" onChange={(value) => updateSettings("mesoPrice", value)} />
+          <NumberField label="상품권 할인율" value={settings.giftDiscount} suffix="%" step={0.1} onChange={(value) => updateSettings("giftDiscount", Math.min(value, 100))} />
+          <NumberField label="경매장 수수료" value={settings.auctionFee} suffix="%" step={0.1} onChange={(value) => updateSettings("auctionFee", Math.min(value, 100))} />
+          <div className={`mileage-value-setting ${settings.mileageMode === "direct" ? "direct" : ""}`}>
             <label className="select-field">
               <span>마일리지 가치</span>
               <select value={settings.mileageMode} onChange={(event) => updateSettings("mileageMode", event.target.value as Settings["mileageMode"])}>
@@ -1925,37 +1922,17 @@ export default function Home() {
               </select>
             </label>
             {settings.mileageMode === "direct" && (
-              <NumberField label="1마일리지 가치" value={settings.mileageWon} suffix="원" step={0.01} onChange={(value) => updateSettings("mileageWon", value)} />
+              <NumberField label="1마일리지당" value={settings.mileageWon} suffix="원" step={0.01} onChange={(value) => updateSettings("mileageWon", value)} />
             )}
-            <label className="switch-row">
-              <span><b>캐시 구매 마일리지 적립</b><small>결제 대상 캐시의 5%를 가치에서 차감</small></span>
-              <input type="checkbox" checked={settings.includeMileageEarned} onChange={(event) => updateSettings("includeMileageEarned", event.target.checked)} />
-            </label>
-            <label className="switch-row">
-              <span><b>마일리지 30% 비교값 표시</b><small>상품 목록에 적용 전·후를 함께 표시</small></span>
-              <input type="checkbox" checked={settings.showMileage} onChange={(event) => updateSettings("showMileage", event.target.checked)} />
-            </label>
           </div>
-          {cloudConfigured && (
-            <div className="cloud-access-row">
-              <span><i aria-hidden="true" /> {editorAccessText}</span>
-              {editorAccess === "unlocked" && <button className="text-button release-access" type="button" onClick={() => { void releaseEditorAccess(); }}>이 기기의 수정 권한 해제</button>}
-            </div>
-          )}
-          {cloudConfigured && needsCloudMigration && (
-            <div className="cloud-migration-notice" role="status">
-              <span><strong>이 기기의 기존 데이터를 공유 데이터로 사용할 수 있습니다.</strong><small>현재 localStorage 데이터는 유지되며, 업로드 전 별도 안전 백업도 만듭니다.</small></span>
-              <button className="secondary-button" type="button" onClick={startCloudMigration}>현재 데이터로 공유 시작</button>
-            </div>
-          )}
-          <div className="data-management-row">
-            <span><strong>PC 백업 파일</strong><small>현재 계산 데이터를 JSON 파일로 안전하게 보관하거나 복원합니다.</small></span>
-            <div>
-              <button className="secondary-button" type="button" onClick={saveBackupFile}>백업 파일 저장</button>
-              <button className="secondary-button" type="button" onClick={() => importRef.current?.click()}>백업 파일 복원</button>
-              <input ref={importRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={selectBackupFile} />
-            </div>
-          </div>
+          <label className="switch-row settings-switch">
+            <span><b>캐시 구매 마일리지 적립</b><small>결제 대상 캐시의 5%를 가치에서 차감</small></span>
+            <input type="checkbox" checked={settings.includeMileageEarned} onChange={(event) => updateSettings("includeMileageEarned", event.target.checked)} />
+          </label>
+          <label className="switch-row settings-switch">
+            <span><b>마일리지 30% 비교값 표시</b><small>상품 목록에 적용 전·후를 함께 표시</small></span>
+            <input type="checkbox" checked={settings.showMileage} onChange={(event) => updateSettings("showMileage", event.target.checked)} />
+          </label>
         </div>
       </section>
 
@@ -1981,6 +1958,46 @@ export default function Home() {
       ) : (
         <section className="empty-best">상품 또는 패키지 구성품의 경매장 가격을 입력하면 가장 효율적인 선택을 보여드려요.</section>
       )}
+
+      <section className="management-card panel" aria-labelledby="management-title">
+        <div className="management-heading">
+          <div>
+            <span className="eyebrow warm">보관 및 접근 설정</span>
+            <h2 id="management-title">데이터 및 권한 관리</h2>
+          </div>
+          <span className={`management-cloud-state cloud-${cloudStatus}`}><i aria-hidden="true" /> {cloudStatusText[cloudStatus]}</span>
+        </div>
+        <div className="management-grid">
+          <div className="management-section backup-management">
+            <div>
+              <h3>데이터 백업</h3>
+              <p>현재 계산 데이터를 JSON 파일로 보관하거나 복원합니다.</p>
+            </div>
+            <div className="management-actions">
+              <button className="secondary-button" type="button" onClick={saveBackupFile}>백업 파일 저장</button>
+              <button className="secondary-button" type="button" onClick={() => importRef.current?.click()}>백업 파일 복원</button>
+              <input ref={importRef} className="visually-hidden" type="file" accept="application/json,.json" onChange={selectBackupFile} />
+            </div>
+          </div>
+          <div className="management-section access-management">
+            <div>
+              <h3>편집 권한</h3>
+              <span className={`access-state ${editorAccessText === "수정 가능" ? "editable" : "readonly"}`}><i aria-hidden="true" /> {editorAccessText}</span>
+              <p>{editorAccessText === "수정 가능" ? "이 기기에서는 가격과 판매 상태를 수정할 수 있습니다." : "수정하려면 관리자 PIN 인증이 필요합니다."}</p>
+            </div>
+            <div className="management-actions">
+              {cloudConfigured && editorAccess === "unlocked" && <button className="secondary-button" type="button" onClick={() => { void releaseEditorAccess(); }}>이 기기의 수정 권한 해제</button>}
+              {cloudConfigured && editorAccess === "readonly" && <button className="secondary-button" type="button" onClick={() => requestSharedEdit(() => setNotice("이 기기에서 수정이 활성화되었습니다."))}>수정 활성화</button>}
+            </div>
+          </div>
+        </div>
+        {cloudConfigured && needsCloudMigration && (
+          <div className="cloud-migration-notice" role="status">
+            <span><strong>이 기기의 기존 데이터를 공유 데이터로 사용할 수 있습니다.</strong><small>현재 localStorage 데이터는 유지되며, 업로드 전 별도 안전 백업도 만듭니다.</small></span>
+            <button className="secondary-button" type="button" onClick={startCloudMigration}>현재 데이터로 공유 시작</button>
+          </div>
+        )}
+      </section>
 
       <section className="products-section" id="products">
         <div className="section-heading outside">

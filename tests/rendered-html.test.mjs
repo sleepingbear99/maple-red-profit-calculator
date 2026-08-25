@@ -39,6 +39,9 @@ test("server-renders the current profit calculator", async () => {
   assert.match(html, /상품 효율 순위/);
   assert.match(html, /현재 메소 현금 시세/);
   assert.match(html, /상품명·패키지·구성품 검색/);
+  assert.match(html, /데이터 및 권한 관리/);
+  assert.match(html, /데이터 백업/);
+  assert.match(html, /편집 권한/);
   assert.match(html, /백업 파일 저장/);
   assert.match(html, /백업 파일 복원/);
   assert.match(html, /aria-expanded="false"/i);
@@ -61,6 +64,43 @@ test("keeps finished source free of starter preview scaffolding", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
   await assert.rejects(access(new URL("public/_sites-preview", templateRoot)));
+});
+
+test("uses a vertical calculation-first header flow and separates management tools", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  const heroStart = page.indexOf('className="hero-section"');
+  const settingsStart = page.indexOf('className="settings-card panel"');
+  const bestStart = page.indexOf('className="best-card"');
+  const managementStart = page.indexOf('className="management-card panel"');
+  const productsStart = page.indexOf('className="products-section"');
+  assert.ok(heroStart >= 0 && heroStart < settingsStart && settingsStart < bestStart && bestStart < managementStart && managementStart < productsStart);
+
+  const settingsMarkup = page.slice(settingsStart, bestStart);
+  assert.match(settingsMarkup, /현재 메소 현금 시세/);
+  assert.match(settingsMarkup, /상품권 할인율/);
+  assert.match(settingsMarkup, /경매장 수수료/);
+  assert.match(settingsMarkup, /마일리지 가치/);
+  assert.match(settingsMarkup, /캐시 구매 마일리지 적립/);
+  assert.match(settingsMarkup, /마일리지 30% 비교값 표시/);
+  assert.doesNotMatch(settingsMarkup, /백업 파일 저장|백업 파일 복원|수정 권한 해제|현재 데이터로 공유 시작/);
+
+  const managementMarkup = page.slice(managementStart, productsStart);
+  assert.match(managementMarkup, /데이터 백업/);
+  assert.match(managementMarkup, /백업 파일 저장/);
+  assert.match(managementMarkup, /백업 파일 복원/);
+  assert.match(managementMarkup, /편집 권한/);
+  assert.match(managementMarkup, /이 기기의 수정 권한 해제/);
+  assert.match(managementMarkup, /현재 데이터로 공유 시작/);
+
+  assert.match(css, /\.hero-section\s*\{[^}]*padding:/s);
+  assert.doesNotMatch(css, /\.intro-grid\s*\{[^}]*grid-template-columns:/s);
+  assert.match(css, /\.settings-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.management-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.settings-grid\s*\{[^}]*grid-template-columns:\s*1fr;[\s\S]*?\.management-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 });
 
 test("separates the ranking list from the component price grid", async () => {
@@ -380,6 +420,6 @@ test("provides validated PC backup and explicit-only cloud restore", async () =>
 
   const backupBuilder = page.slice(page.indexOf("function createLocalBackup"), page.indexOf("function normalizeBackupSettings"));
   assert.doesNotMatch(backupBuilder, /EDITOR_TOKEN_KEY|mapleRedEditorToken|ADMIN_PIN|SUPABASE|service_role/i);
-  assert.match(css, /\.data-management-row/);
+  assert.match(css, /\.management-card/);
   assert.match(css, /\.restore-summary/);
 });
