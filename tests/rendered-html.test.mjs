@@ -178,7 +178,7 @@ test("uses the simplified catalog taxonomy and preserves legacy saved values", a
   assert.match(catalog, /INITIAL_DATA_COUNTS\.randomProducts !== 10/);
   assert.match(catalog, /INITIAL_DATA_COUNTS\.couponProducts !== 14/);
   assert.match(catalog, /CURRENT_PRODUCTS\.filter\(\(item\) => item\.mileage30Eligible\)\.length !== 8/);
-  assert.match(page, /const STORAGE_VERSION = 8/);
+  assert.match(page, /const STORAGE_VERSION = 9/);
   assert.match(page, /ring: "utility"/);
   assert.match(page, /bundle: "random"/);
   assert.match(page, /gift: "boutique"/);
@@ -226,4 +226,42 @@ test("adds the new random and freestyle products without changing calculation be
   assert.match(page, /subcategory: fallback\.subcategory/);
   assert.match(page, /saved\?\.componentPrices\?\.\[component\.id\]/);
   assert.match(css, /\.filter-tabs button\s*\{[^}]*white-space:\s*nowrap;/s);
+});
+
+test("corrects Cannon Shooter components and disables accidental number-input increments", async () => {
+  const [page, catalog, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/product-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  for (const weapon of ["대검", "쌍검", "스태프", "활"]) {
+    assert.match(catalog, new RegExp(`\\{ name: "최초의 대적자 ${weapon}", cashPrice: 4900 \\}`));
+  }
+  assert.doesNotMatch(catalog, /모험가 캐논슈터 슈트|모험가 캐논슈터 캐논/);
+  assert.match(catalog, /adventurer-19[^\n]*모험가 캐논슈터 갑옷\(남\)[^\n]*모험가 캐논슈터 부츠[^\n]*모험가 캐논슈터 포탄[^\n]*모험가 캐논슈터 헤어밴드\(남\)[^\n]*모험가 캐논슈터 귀고리/);
+  assert.match(catalog, /adventurer-20[^\n]*모험가 캐논슈터 갑옷\(여\)[^\n]*모험가 캐논슈터 부츠[^\n]*모험가 캐논슈터 포탄[^\n]*모험가 캐논슈터 헤어밴드\(여\)[^\n]*모험가 캐논슈터 귀고리/);
+
+  for (const componentId of [
+    "adventurer-19-component-1",
+    "adventurer-19-component-3",
+    "adventurer-20-component-1",
+    "adventurer-20-component-3",
+  ]) {
+    assert.match(page, new RegExp(`"${componentId}"`));
+  }
+  for (const componentId of [
+    "adventurer-19-excluded-component-1",
+    "adventurer-19-excluded-component-2",
+    "adventurer-20-excluded-component-1",
+    "adventurer-20-excluded-component-2",
+  ]) {
+    assert.match(page, new RegExp(`"${componentId}"`));
+  }
+  assert.match(page, /fallbackComponents\.get\(component\.id\)/);
+  assert.match(page, /saved\?\.componentPrices\?\.\[component\.id\]/);
+  assert.match(page, /document\.addEventListener\("wheel", preventNumberInputWheel, \{ capture: true, passive: false \}\)/);
+  assert.match(page, /target\.type === "number"[\s\S]*document\.activeElement === target[\s\S]*event\.preventDefault\(\)/);
+  assert.match(css, /input\[type="number"\]\s*\{[^}]*appearance:\s*textfield;[^}]*-moz-appearance:\s*textfield;/s);
+  assert.match(css, /input\[type="number"\]::\-webkit-inner-spin-button,[\s\S]*input\[type="number"\]::\-webkit-outer-spin-button\s*\{[^}]*-webkit-appearance:\s*none;/s);
 });

@@ -57,7 +57,7 @@ type PlanItem = {
 type ProductDraft = CatalogProduct & ProductPriceData & { isNew?: boolean };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 8;
+const STORAGE_VERSION = 9;
 const MILEAGE_RATE = 0.05;
 
 const DEFAULT_SETTINGS: Settings = {
@@ -80,6 +80,10 @@ const RENAMED_BUILT_IN_COMPONENT_IDS = new Set([
   "boss-22-component-1",
   "bundle-01-component-1",
   "bundle-02-component-1",
+  "adventurer-19-component-1",
+  "adventurer-19-component-3",
+  "adventurer-20-component-1",
+  "adventurer-20-component-3",
 ]);
 
 const RENAMED_BUILT_IN_PRODUCT_IDS = new Set([
@@ -90,6 +94,10 @@ const RENAMED_BUILT_IN_PRODUCT_IDS = new Set([
 const REQUIRED_BUILT_IN_EXCLUDED_COMPONENT_IDS = new Set([
   "adventurer-15-excluded-component-1",
   "adventurer-16-excluded-component-1",
+  "adventurer-19-excluded-component-1",
+  "adventurer-19-excluded-component-2",
+  "adventurer-20-excluded-component-1",
+  "adventurer-20-excluded-component-2",
 ]);
 
 const PRODUCT_STATUS_OPTIONS: [ProductStatus, string][] = [
@@ -586,6 +594,22 @@ export default function Home() {
       JSON.stringify({ version: STORAGE_VERSION, settings, products, priceData, plan, goalCash }),
     );
   }, [settings, products, priceData, plan, goalCash, hydrated]);
+
+  useEffect(() => {
+    const preventNumberInputWheel = (event: WheelEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement &&
+        target.type === "number" &&
+        document.activeElement === target
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener("wheel", preventNumberInputWheel, { capture: true, passive: false });
+    return () => document.removeEventListener("wheel", preventNumberInputWheel, true);
+  }, []);
 
   useEffect(() => {
     if (!notice) return;

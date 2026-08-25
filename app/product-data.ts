@@ -4,6 +4,18 @@ export type ProductComponent = {
   quantity: number;
 };
 
+export type ComponentCashPriceReference = {
+  name: string;
+  cashPrice: number;
+};
+
+export const COMPONENT_CASH_PRICE_REFERENCES: ComponentCashPriceReference[] = [
+  { name: "최초의 대적자 대검", cashPrice: 4900 },
+  { name: "최초의 대적자 쌍검", cashPrice: 4900 },
+  { name: "최초의 대적자 스태프", cashPrice: 4900 },
+  { name: "최초의 대적자 활", cashPrice: 4900 },
+];
+
 export type ProductCategory =
   | "basic"
   | "random"
@@ -316,8 +328,8 @@ const ADVENTURER_PRODUCTS: CatalogProduct[] = [
   job("adventurer-16", "모험가 나이트로드 패키지(여)", "모험가", 10000, ["모험가 나이트로드 슈트", "모험가 나이트로드 부츠", "모험가 나이트로드 표창"], ["모험가 나이트로드 헤어밴드(여)"]),
   job("adventurer-17", "모험가 듀얼블레이드 패키지", "모험가", 10000, ["모험가 듀얼블레이드 슈트", "모험가 듀얼블레이드 부츠", "모험가 듀얼블레이드 단검"]),
   job("adventurer-18", "모험가 섀도어 패키지", "모험가", 10000, ["모험가 섀도어 슈트", "모험가 섀도어 부츠", "모험가 섀도어 단검"]),
-  job("adventurer-19", "모험가 캐논슈터 패키지(남)", "모험가", 10000, ["모험가 캐논슈터 슈트(남)", "모험가 캐논슈터 부츠", "모험가 캐논슈터 캐논"]),
-  job("adventurer-20", "모험가 캐논슈터 패키지(여)", "모험가", 10000, ["모험가 캐논슈터 슈트(여)", "모험가 캐논슈터 부츠", "모험가 캐논슈터 캐논"]),
+  job("adventurer-19", "모험가 캐논슈터 패키지(남)", "모험가", 10000, ["모험가 캐논슈터 갑옷(남)", "모험가 캐논슈터 부츠", "모험가 캐논슈터 포탄"], ["모험가 캐논슈터 헤어밴드(남)", "모험가 캐논슈터 귀고리"]),
+  job("adventurer-20", "모험가 캐논슈터 패키지(여)", "모험가", 10000, ["모험가 캐논슈터 갑옷(여)", "모험가 캐논슈터 부츠", "모험가 캐논슈터 포탄"], ["모험가 캐논슈터 헤어밴드(여)", "모험가 캐논슈터 귀고리"]),
   job("adventurer-21", "모험가 바이퍼 패키지(남)", "모험가", 10000, ["모험가 바이퍼 갑옷(남)", "모험가 바이퍼 부츠", "모험가 바이퍼 너클"]),
   job("adventurer-22", "모험가 바이퍼 패키지(여)", "모험가", 10000, ["모험가 바이퍼 갑옷(여)", "모험가 바이퍼 부츠", "모험가 바이퍼 너클"]),
   job("adventurer-23", "모험가 캡틴 패키지(남)", "모험가", 10000, ["모험가 캡틴 갑옷(남)", "모험가 캡틴 부츠(남)", "모험가 캡틴 건"]),
@@ -441,6 +453,18 @@ function validateInitialCatalog() {
   if (CURRENT_PRODUCTS.some((item) => item.status !== "active" && !["bundle-01", "bundle-02"].includes(item.id))) throw new Error("초기 상품의 판매 상태가 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.filter((item) => ["bundle-01", "bundle-02"].includes(item.id)).some((item) => item.status !== "ended")) throw new Error("부티크 기프트의 판매 종료 상태가 올바르지 않습니다.");
   if (CURRENT_PRODUCTS.some((item) => item.name === "블레어 살롱 헤어 쿠폰")) throw new Error("판매 종료 상품이 현재 판매 목록에 포함되었습니다.");
+  const adversaryWeaponNames = new Set([
+    "최초의 대적자 대검",
+    "최초의 대적자 쌍검",
+    "최초의 대적자 스태프",
+    "최초의 대적자 활",
+  ]);
+  if (
+    COMPONENT_CASH_PRICE_REFERENCES.length !== adversaryWeaponNames.size ||
+    COMPONENT_CASH_PRICE_REFERENCES.some((item) => !adversaryWeaponNames.has(item.name) || item.cashPrice !== 4900)
+  ) {
+    throw new Error("최초의 대적자 무기 기준 가격이 올바르지 않습니다.");
+  }
   const ids = new Set(CURRENT_PRODUCTS.map((item) => item.id));
   if (ids.size !== CURRENT_PRODUCTS.length) throw new Error("중복 상품 ID가 있습니다.");
 }

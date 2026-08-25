@@ -386,6 +386,17 @@ footer > small { margin-left: auto; }
 .modal-actions .danger-button { margin-right: auto; }
 
 /* Warm neutral palette and data-first typography */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
 input[type="number"],
 table,
 .metric strong,
