@@ -14,12 +14,25 @@ function plainObject(value: unknown): value is Record<string, unknown> {
 
 function validSettingsData(value: unknown) {
   if (!plainObject(value) || !plainObject(value.values) || !plainObject(value.fieldUpdatedAt)) return false;
-  const allowedKeys = new Set(["mesoPrice", "giftDiscount", "auctionFee", "mileageMode", "mileageWon", "includeMileageEarned", "showMileage"]);
+  const allowedKeys = new Set([
+    "mesoPrice",
+    "giftDiscount",
+    "auctionFee",
+    "creditEarnRate",
+    "creditValuePer10000",
+    "creditValuePer1000",
+    "includeCreditValue",
+    "mileageMode",
+    "mileageWon",
+    "includeMileageEarned",
+    "showMileage",
+  ]);
   if (Object.keys(value.values).some((key) => !allowedKeys.has(key))) return false;
   if (Object.keys(value.fieldUpdatedAt).some((key) => !allowedKeys.has(key) || !validTimestamp(value.fieldUpdatedAt[key]))) return false;
   for (const [key, setting] of Object.entries(value.values)) {
-    if (["mesoPrice", "giftDiscount", "auctionFee", "mileageWon"].includes(key) && !(typeof setting === "number" && Number.isFinite(setting) && setting >= 0)) return false;
-    if (["includeMileageEarned", "showMileage"].includes(key) && typeof setting !== "boolean") return false;
+    if (["mesoPrice", "giftDiscount", "auctionFee", "creditValuePer10000", "creditValuePer1000", "mileageWon"].includes(key) && !(typeof setting === "number" && Number.isFinite(setting) && setting >= 0)) return false;
+    if (key === "creditEarnRate" && !(typeof setting === "number" && Number.isFinite(setting) && setting >= 0 && setting <= 1)) return false;
+    if (["includeCreditValue", "includeMileageEarned", "showMileage"].includes(key) && typeof setting !== "boolean") return false;
     if (key === "mileageMode" && setting !== "none" && setting !== "direct") return false;
   }
   return true;

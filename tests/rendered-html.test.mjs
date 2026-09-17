@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  calculateCreditSummary,
+  canonicalizeTimestamp,
+  migrateLegacyCreditSettings,
+} from "../app/credit-value.js";
 
 const templateRoot = new URL("../", import.meta.url);
 
@@ -38,6 +43,7 @@ test("server-renders the current profit calculator", async () => {
   assert.match(html, /id="products"/i);
   assert.match(html, /상품 효율 순위/);
   assert.match(html, /현재 메소 현금 시세/);
+  assert.match(html, /크레딧 설정/);
   assert.match(html, /상품명·패키지·구성품 검색/);
   assert.match(html, /데이터 및 권한 관리/);
   assert.match(html, /데이터 백업/);
@@ -46,6 +52,53 @@ test("server-renders the current profit calculator", async () => {
   assert.match(html, /백업 파일 복원/);
   assert.match(html, /aria-expanded="false"/i);
   assert.doesNotMatch(html, /codex-preview|Building your site|SkeletonPreview/i);
+});
+
+test("calculates optional credit value only for the overall recovery", () => {
+  const first = calculateCreditSummary({
+    totalCashUsed: 200_000,
+    baseRecoveryEok: 60,
+    earnRate: 0.05,
+    valuePer10000: 5.51,
+    includeCreditValue: true,
+  });
+  assert.equal(first.earnedCredit, 10_000);
+  assert.equal(first.creditValueEok, 5.51);
+  assert.equal(first.finalRecoveryEok, 65.51);
+
+  const second = calculateCreditSummary({
+    totalCashUsed: 400_000,
+    baseRecoveryEok: 60,
+    earnRate: 0.05,
+    valuePer10000: 5.51,
+    includeCreditValue: true,
+  });
+  assert.equal(second.earnedCredit, 20_000);
+  assert.equal(second.creditValueEok, 11.02);
+
+  const disabled = calculateCreditSummary({
+    totalCashUsed: 200_000,
+    baseRecoveryEok: 60,
+    earnRate: 0.05,
+    valuePer10000: 5.51,
+    includeCreditValue: false,
+  });
+  assert.equal(disabled.appliedCreditValueEok, 0);
+  assert.equal(disabled.finalRecoveryEok, 60);
+});
+
+test("migrates legacy credit values and canonicalizes cloud timestamps", () => {
+  assert.equal(migrateLegacyCreditSettings({ creditValuePer1000: 0.551 }).creditValuePer10000, 5.51);
+  assert.equal(
+    migrateLegacyCreditSettings({ creditValuePer10000: 6.2, creditValuePer1000: 0.551 }).creditValuePer10000,
+    6.2,
+  );
+  assert.equal(
+    migrateLegacyCreditSettings({ creditValuePer10000: null, creditValuePer1000: 0.551 }).creditValuePer10000,
+    5.51,
+  );
+  assert.equal(canonicalizeTimestamp("2026-09-17 12:34:56+00"), "2026-09-17T12:34:56.000Z");
+  assert.equal(canonicalizeTimestamp("2026-09-17T12:34:56.000Z"), "2026-09-17T12:34:56.000Z");
 });
 
 test("keeps finished source free of starter preview scaffolding", async () => {
@@ -83,9 +136,11 @@ test("uses a vertical calculation-first header flow and separates management too
   assert.match(settingsMarkup, /현재 메소 현금 시세/);
   assert.match(settingsMarkup, /상품권 할인율/);
   assert.match(settingsMarkup, /경매장 수수료/);
-  assert.match(settingsMarkup, /마일리지 가치/);
-  assert.match(settingsMarkup, /캐시 구매 마일리지 적립/);
-  assert.match(settingsMarkup, /마일리지 30% 비교값 표시/);
+  assert.match(settingsMarkup, /크레딧 설정/);
+  assert.match(settingsMarkup, /크레딧 적립률/);
+  assert.match(settingsMarkup, /억 \/ 10,000C/);
+  assert.match(settingsMarkup, /크레딧 가치 반영/);
+  assert.doesNotMatch(settingsMarkup, /마일리지 가치|캐시 구매 마일리지 적립|마일리지 30% 비교값 표시/);
   assert.doesNotMatch(settingsMarkup, /백업 파일 저장|백업 파일 복원|수정 권한 해제|현재 데이터로 공유 시작/);
 
   const managementMarkup = page.slice(managementStart, productsStart);
@@ -99,6 +154,8 @@ test("uses a vertical calculation-first header flow and separates management too
   assert.match(css, /\.hero-section\s*\{[^}]*padding:/s);
   assert.doesNotMatch(css, /\.intro-grid\s*\{[^}]*grid-template-columns:/s);
   assert.match(css, /\.settings-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.credit-settings-group\s*\{[^}]*grid-column:\s*1 \/ -1;/s);
+  assert.match(css, /\.credit-settings-grid\s*\{[^}]*grid-template-columns:/s);
   assert.match(css, /\.management-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.settings-grid\s*\{[^}]*grid-template-columns:\s*1fr;[\s\S]*?\.management-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 });
@@ -122,7 +179,7 @@ test("separates the ranking list from the component price grid", async () => {
   assert.match(css, /\.component-price-grid\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(tabletStyles, /\.component-price-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(mobileStyles, /\.component-price-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-  assert.match(page, /마일30 가능/);
+  assert.doesNotMatch(page, /마일30 가능|마일30 적용|마일 사용 불가/);
   assert.match(page, /구성 \{includedCount \+ excludedCount\}개/);
   assert.match(page, /\{formatNumber\(product\.cashPrice\)\}캐시/);
   assert.match(css, /\.card-product-name > strong\s*\{[^}]*word-break:\s*keep-all;[^}]*overflow-wrap:\s*break-word;/s);
@@ -147,18 +204,12 @@ test("separates the ranking list from the component price grid", async () => {
   assert.match(narrowMobileStyles, /\.component-price-summary-grid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
 });
 
-test("keeps catalog corrections, mileage comparison, and ended-product ordering", async () => {
+test("keeps catalog corrections, credit isolation, and ended-product ordering", async () => {
   const [page, catalog, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/product-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
-  const tabletStart = css.lastIndexOf("@media (max-width: 1199px)");
-  const mobileStart = css.lastIndexOf("@media (max-width: 767px)");
-  const narrowMobileStart = css.lastIndexOf("@media (max-width: 420px)");
-  const tabletStyles = css.slice(tabletStart, mobileStart);
-  const mobileStyles = css.slice(mobileStart, narrowMobileStart);
-
   assert.doesNotMatch(catalog, /레지스탕스 메카닉 무기|레지스탕스 배틀메이지 모자|림보 날/);
   assert.match(catalog, /레지스탕스 메카닉 건/);
   assert.match(catalog, /레지스탕스 배틀메이지 고글/);
@@ -171,21 +222,12 @@ test("keeps catalog corrections, mileage comparison, and ended-product ordering"
   assert.doesNotMatch(page, /"reference"|"mileageReference"|마일리지 참고/);
   assert.doesNotMatch(css, /category-reference|reference-detail-note/);
 
-  assert.match(page, /settings\.showMileage && product\.mileage30Eligible && hasPrice/);
-  assert.match(page, /className=\{`product-card-toggle\$\{settings\.showMileage \? " with-mileage" : ""\}`\}/);
-  assert.match(page, /\{settings\.showMileage && \(\s*<span className="card-mileage-efficiency">/s);
-  assert.match(page, /<small>마일30 적용<\/small>/);
-  assert.match(page, /className="card-mileage-value"/);
-  assert.match(page, /formatNumber\(mileage\.mileageUsed\)\}마일/);
-  assert.match(page, /<strong className="card-mileage-empty">—<\/strong>/);
-  assert.doesNotMatch(page, /className="card-mileage-comparison"/);
-  const primaryEfficiency = page.match(/<span className="card-primary-efficiency">[\s\S]*?<\/span>\s*<\/span>/)?.[0] ?? "";
-  assert.doesNotMatch(primaryEfficiency, /mileage|마일30/i);
-  assert.match(css, /\.product-card-toggle\.with-mileage\s*\{[^}]*grid-template-areas:\s*"rank identity cash sale net efficiency mileage chevron";/s);
-  assert.match(css, /\.card-mileage-efficiency\s*\{[^}]*grid-area:\s*mileage;/s);
-  assert.match(css, /\.card-mileage-value > strong,[\s\S]*\.card-mileage-empty\s*\{[^}]*white-space:\s*nowrap;/s);
-  assert.match(tabletStyles, /\.product-card-toggle\.with-mileage\s*\{[^}]*repeat\(5,\s*minmax\(0,\s*1fr\)\)[^}]*"\. cash sale net efficiency mileage \.";/s);
-  assert.match(mobileStyles, /\.product-card-toggle\.with-mileage\s*\{[^}]*"\. mileage mileage mileage mileage \.";/s);
+  assert.doesNotMatch(page, /card-mileage-efficiency|card-mileage-value|with-mileage|마일30 적용/);
+  const productCalculation = page.slice(page.indexOf("function calculate("), page.indexOf("function verdict("));
+  const rankingCalculation = page.slice(page.indexOf("const rankedProducts"), page.indexOf("const detailProduct"));
+  assert.doesNotMatch(productCalculation, /creditEarnRate|creditValuePer10000|includeCreditValue|calculateCreditSummary/);
+  assert.doesNotMatch(rankingCalculation, /calculateCreditSummary|creditValueEok|finalRecoveryEok/);
+  assert.match(page, /const planCredit = calculateCreditSummary\(/);
 
   assert.match(page, /const aEnded = effectiveProductStatus\(a\) === "ended" \? 1 : 0;/);
   assert.match(page, /if \(aEnded !== bEnded\) return aEnded - bEnded;/);
@@ -235,7 +277,7 @@ test("uses the simplified catalog taxonomy and preserves legacy saved values", a
   assert.match(catalog, /INITIAL_DATA_COUNTS\.randomProducts !== 10/);
   assert.match(catalog, /INITIAL_DATA_COUNTS\.couponProducts !== 14/);
   assert.match(catalog, /CURRENT_PRODUCTS\.filter\(\(item\) => item\.mileage30Eligible\)\.length !== 8/);
-  assert.match(page, /const STORAGE_VERSION = 9/);
+  assert.match(page, /const STORAGE_VERSION = 10/);
   assert.match(page, /ring: "utility"/);
   assert.match(page, /bundle: "random"/);
   assert.match(page, /gift: "boutique"/);
@@ -369,6 +411,12 @@ test("adds local-first Supabase sync without weakening existing storage or write
   assert.match(unlock, /365 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(save, /verifyEditSession/);
   assert.match(save, /rpc\("merge_shared_payload"/);
+  assert.match(save, /"creditEarnRate"/);
+  assert.match(save, /"creditValuePer10000"/);
+  assert.match(save, /"includeCreditValue"/);
+  assert.match(save, /key === "creditEarnRate"[\s\S]*setting <= 1/);
+  assert.match(page, /settingsUpdatedAt\.creditValuePer10000 = settingsUpdatedAt\.creditValuePer1000/);
+  assert.match(page, /canonicalizeCloudSettingsData/);
   assert.match(revoke, /revoked_at/);
 
   assert.match(workflow, /VITE_SUPABASE_URL:\s*\$\{\{ secrets\.VITE_SUPABASE_URL \}\}/);
@@ -393,6 +441,12 @@ test("provides validated PC backup and explicit-only cloud restore", async () =>
   assert.match(page, /currentMarketPrice: componentPrice\.currentMarketPrice,[\s\S]*recentTradePrice: componentPrice\.recentTradePrice/);
   assert.match(page, /status: product\.status,[\s\S]*statusSource: product\.statusSource,[\s\S]*saleStartAt:[\s\S]*saleEndAt:/);
   assert.match(page, /mileageMode[\s\S]*includeMileageEarned[\s\S]*showMileage/);
+  assert.match(page, /creditEarnRate:\s*0\.05/);
+  assert.match(page, /creditValuePer10000:\s*5\.51/);
+  assert.match(page, /includeCreditValue:\s*true/);
+  assert.match(page, /normalizeStoredSettings\(parsed\.settings\)/);
+  assert.match(page, /"creditValuePer10000" in normalizedValue/);
+  assert.match(page, /"includeCreditValue" in normalizedValue/);
   assert.match(page, /maple-red-backup-\$\{backupFileTimestamp\(\)\}\.json/);
   assert.match(page, /application\/json;charset=utf-8/);
 

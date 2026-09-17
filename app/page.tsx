@@ -29,6 +29,11 @@ import {
   type SharedSavePayload,
   type SharedSnapshot,
 } from "./cloud-sync";
+import {
+  calculateCreditSummary,
+  canonicalizeTimestamp,
+  migrateLegacyCreditSettings,
+} from "./credit-value.js";
 
 type PriceBasis = "current" | "recent";
 type CategoryFilter = "all" | ProductCategory;
@@ -40,6 +45,9 @@ type Settings = {
   mesoPrice: number;
   giftDiscount: number;
   auctionFee: number;
+  creditEarnRate: number;
+  creditValuePer10000: number;
+  includeCreditValue: boolean;
   mileageMode: "none" | "direct";
   mileageWon: number;
   includeMileageEarned: boolean;
@@ -136,7 +144,7 @@ type RestoreCandidate = {
 };
 
 const STORAGE_KEY = "red-work-profit-calculator-v1";
-const STORAGE_VERSION = 9;
+const STORAGE_VERSION = 10;
 const MILEAGE_RATE = 0.05;
 const BACKUP_TYPE = "maple-red-profit-calculator";
 const BACKUP_SCHEMA_VERSION = 1;
@@ -155,6 +163,9 @@ const DEFAULT_SETTINGS: Settings = {
   mesoPrice: 1550,
   giftDiscount: 6,
   auctionFee: 5,
+  creditEarnRate: 0.05,
+  creditValuePer10000: 5.51,
+  includeCreditValue: true,
   mileageMode: "none",
   mileageWon: 0.7,
   includeMileageEarned: false,
@@ -513,9 +524,15 @@ function parseCloudMeta(value: string | null): CloudSyncMeta {
   if (!value) return { ...EMPTY_CLOUD_META, settingsUpdatedAt: {}, productUpdatedAt: {}, componentUpdatedAt: {} };
   try {
     const parsed = JSON.parse(value) as Partial<CloudSyncMeta>;
+    const settingsUpdatedAt = isRecord(parsed.settingsUpdatedAt)
+      ? { ...parsed.settingsUpdatedAt } as Record<string, string>
+      : {};
+    if (!settingsUpdatedAt.creditValuePer10000 && settingsUpdatedAt.creditValuePer1000) {
+      settingsUpdatedAt.creditValuePer10000 = settingsUpdatedAt.creditValuePer1000;
+    }
     return {
       version: 1,
-      settingsUpdatedAt: isRecord(parsed.settingsUpdatedAt) ? parsed.settingsUpdatedAt as CloudSyncMeta["settingsUpdatedAt"] : {},
+      settingsUpdatedAt: settingsUpdatedAt as CloudSyncMeta["settingsUpdatedAt"],
       productUpdatedAt: isRecord(parsed.productUpdatedAt) ? parsed.productUpdatedAt as Record<string, string> : {},
       componentUpdatedAt: isRecord(parsed.componentUpdatedAt) ? parsed.componentUpdatedAt as Record<string, string> : {},
       cloudMigrationVersion: typeof parsed.cloudMigrationVersion === "number" ? parsed.cloudMigrationVersion : 0,
@@ -540,9 +557,32 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+function canonicalizeCloudSettingsData(data: Record<string, unknown>) {
+  if (isRecord(data.values)) {
+    const values = migrateLegacyCreditSettings(data.values);
+    delete values.creditValuePer1000;
+    const fieldUpdatedAt = isRecord(data.fieldUpdatedAt) ? { ...data.fieldUpdatedAt } : {};
+    if (!fieldUpdatedAt.creditValuePer10000 && fieldUpdatedAt.creditValuePer1000) {
+      fieldUpdatedAt.creditValuePer10000 = fieldUpdatedAt.creditValuePer1000;
+    }
+    delete fieldUpdatedAt.creditValuePer1000;
+    const canonicalFieldUpdatedAt = Object.fromEntries(
+      Object.entries(fieldUpdatedAt).map(([key, value]) => [key, canonicalizeTimestamp(value)]),
+    );
+    return { ...data, values, fieldUpdatedAt: canonicalFieldUpdatedAt };
+  }
+  const values = migrateLegacyCreditSettings(data);
+  delete values.creditValuePer1000;
+  return values;
+}
+
 function snapshotContainsPayload(snapshot: SharedSnapshot, payload: SharedSavePayload) {
   if (payload.settings) {
-    if (!snapshot.settings || stableJson(snapshot.settings.data) !== stableJson(payload.settings.data)) return false;
+    if (
+      !snapshot.settings ||
+      stableJson(canonicalizeCloudSettingsData(snapshot.settings.data)) !==
+        stableJson(canonicalizeCloudSettingsData(payload.settings.data))
+    ) return false;
   }
   const remoteProducts = new Map(snapshot.products.map((row) => [row.productId, row.data]));
   if ((payload.products ?? []).some((row) => stableJson(remoteProducts.get(row.productId)) !== stableJson(row.data))) return false;
@@ -594,8 +634,13 @@ function mergeSharedSnapshot(
   };
 
   if (snapshot.settings) {
-    const values = isRecord(snapshot.settings.data.values) ? snapshot.settings.data.values : snapshot.settings.data;
-    const fieldUpdatedAt = isRecord(snapshot.settings.data.fieldUpdatedAt) ? snapshot.settings.data.fieldUpdatedAt : {};
+    const rawValues = isRecord(snapshot.settings.data.values) ? snapshot.settings.data.values : snapshot.settings.data;
+    const values = migrateLegacyCreditSettings(rawValues);
+    const rawFieldUpdatedAt = isRecord(snapshot.settings.data.fieldUpdatedAt) ? snapshot.settings.data.fieldUpdatedAt : {};
+    const fieldUpdatedAt = { ...rawFieldUpdatedAt };
+    if (!("creditValuePer10000" in rawValues) && typeof rawFieldUpdatedAt.creditValuePer1000 === "string") {
+      fieldUpdatedAt.creditValuePer10000 = rawFieldUpdatedAt.creditValuePer1000;
+    }
     for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
       const remoteValue = values[key];
       const remoteUpdatedAt = typeof fieldUpdatedAt[key] === "string" ? fieldUpdatedAt[key] as string : snapshot.settings.updatedAt;
@@ -739,36 +784,85 @@ function createLocalBackup(
 
 function normalizeBackupSettings(value: unknown, strict: boolean) {
   if (!isRecord(value)) return null;
+  const normalizedValue = migrateLegacyCreditSettings(value);
   const next: Settings = { ...DEFAULT_SETTINGS };
   const numberKeys: (keyof Pick<Settings, "mesoPrice" | "giftDiscount" | "auctionFee" | "mileageWon">)[] = [
     "mesoPrice", "giftDiscount", "auctionFee", "mileageWon",
   ];
   const booleanKeys: (keyof Pick<Settings, "includeMileageEarned" | "showMileage">)[] = ["includeMileageEarned", "showMileage"];
   for (const key of numberKeys) {
-    if (!(key in value)) {
+    if (!(key in normalizedValue)) {
       if (strict) return null;
       continue;
     }
-    const setting = value[key];
+    const setting = normalizedValue[key];
     if (typeof setting !== "number" || !Number.isFinite(setting) || setting < 0) return null;
     if ((key === "giftDiscount" || key === "auctionFee") && setting > 100) return null;
     next[key] = setting;
   }
   for (const key of booleanKeys) {
-    if (!(key in value)) {
+    if (!(key in normalizedValue)) {
       if (strict) return null;
       continue;
     }
-    if (typeof value[key] !== "boolean") return null;
-    next[key] = value[key];
+    if (typeof normalizedValue[key] !== "boolean") return null;
+    next[key] = normalizedValue[key];
   }
-  if (!("mileageMode" in value)) {
+  if (!("mileageMode" in normalizedValue)) {
     if (strict) return null;
-  } else if (value.mileageMode === "none" || value.mileageMode === "direct") {
-    next.mileageMode = value.mileageMode;
+  } else if (normalizedValue.mileageMode === "none" || normalizedValue.mileageMode === "direct") {
+    next.mileageMode = normalizedValue.mileageMode;
   } else {
     return null;
   }
+
+  if ("creditEarnRate" in normalizedValue) {
+    const earnRate = normalizedValue.creditEarnRate;
+    if (typeof earnRate !== "number" || !Number.isFinite(earnRate) || earnRate < 0 || earnRate > 1) return null;
+    next.creditEarnRate = earnRate;
+  }
+  if ("creditValuePer10000" in normalizedValue) {
+    const creditValue = normalizedValue.creditValuePer10000;
+    if (typeof creditValue !== "number" || !Number.isFinite(creditValue) || creditValue < 0) return null;
+    next.creditValuePer10000 = creditValue;
+  }
+  if ("includeCreditValue" in normalizedValue) {
+    if (typeof normalizedValue.includeCreditValue !== "boolean") return null;
+    next.includeCreditValue = normalizedValue.includeCreditValue;
+  }
+  return next;
+}
+
+function normalizeStoredSettings(value: unknown): Settings {
+  if (!isRecord(value)) return { ...DEFAULT_SETTINGS };
+  const normalizedValue = migrateLegacyCreditSettings(value);
+  const next: Settings = { ...DEFAULT_SETTINGS };
+  const validNumber = (key: keyof Settings, maximum = Number.POSITIVE_INFINITY) => {
+    const setting = normalizedValue[key];
+    return typeof setting === "number" && Number.isFinite(setting) && setting >= 0 && setting <= maximum
+      ? setting
+      : null;
+  };
+
+  const mesoPrice = validNumber("mesoPrice");
+  const giftDiscount = validNumber("giftDiscount", 100);
+  const auctionFee = validNumber("auctionFee", 100);
+  const mileageWon = validNumber("mileageWon");
+  const creditEarnRate = validNumber("creditEarnRate", 1);
+  const creditValuePer10000 = validNumber("creditValuePer10000");
+  if (mesoPrice !== null) next.mesoPrice = mesoPrice;
+  if (giftDiscount !== null) next.giftDiscount = giftDiscount;
+  if (auctionFee !== null) next.auctionFee = auctionFee;
+  if (mileageWon !== null) next.mileageWon = mileageWon;
+  if (creditEarnRate !== null) next.creditEarnRate = creditEarnRate;
+  if (creditValuePer10000 !== null) next.creditValuePer10000 = creditValuePer10000;
+
+  if (normalizedValue.mileageMode === "none" || normalizedValue.mileageMode === "direct") {
+    next.mileageMode = normalizedValue.mileageMode;
+  }
+  if (typeof normalizedValue.includeMileageEarned === "boolean") next.includeMileageEarned = normalizedValue.includeMileageEarned;
+  if (typeof normalizedValue.showMileage === "boolean") next.showMileage = normalizedValue.showMileage;
+  if (typeof normalizedValue.includeCreditValue === "boolean") next.includeCreditValue = normalizedValue.includeCreditValue;
   return next;
 }
 
@@ -1101,7 +1195,7 @@ export default function Home() {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        const nextSettings = parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : DEFAULT_SETTINGS;
+        const nextSettings = normalizeStoredSettings(parsed.settings);
         setSettings(nextSettings);
         settingsRef.current = nextSettings;
         const nextProducts = migrateCatalogProducts(parsed.version, parsed.products);
@@ -1353,10 +1447,18 @@ export default function Home() {
     );
   }, [plan, products, priceData, settings]);
 
-  const planMarketValue = planTotals.netMeso * settings.mesoPrice;
   const planCost = settings.mileageMode === "direct" ? planTotals.economicCost : planTotals.actualCash;
+  const planCredit = calculateCreditSummary({
+    totalCashUsed: planTotals.cashPurchased,
+    baseRecoveryEok: planTotals.netMeso,
+    earnRate: settings.creditEarnRate,
+    valuePer10000: settings.creditValuePer10000,
+    includeCreditValue: settings.includeCreditValue,
+  });
+  const planMarketValue = planCredit.finalRecoveryEok * settings.mesoPrice;
   const planDifference = planMarketValue - planCost;
   const planPercent = planMarketValue > 0 ? (planDifference / planMarketValue) * 100 : 0;
+  const planCashPerEok = planCredit.finalRecoveryEok > 0 ? planCost / planCredit.finalRecoveryEok : Number.POSITIVE_INFINITY;
   const remainingGoal = Math.max(goalCash - planTotals.cashPurchased, 0);
   const goalProgress = goalCash > 0 ? Math.min((planTotals.cashPurchased / goalCash) * 100, 100) : 0;
 
@@ -1889,7 +1991,7 @@ export default function Home() {
         <div className="hero-copy">
           <span className="eyebrow">RED WORK ECONOMY TOOL</span>
           <h1>감이 아닌 숫자로<br />레드작을 결정하세요.</h1>
-          <p className="lead">상품권 할인, 경매장 수수료, 마일리지까지 반영해 실제 1억 메소당 비용과 메소 직구 대비 차이를 계산합니다.</p>
+          <p className="lead">상품권 할인과 경매장 수수료를 반영하고, 전체 구매 계획에서는 적립 크레딧의 추가 가치까지 계산합니다.</p>
           <div className="hero-notes">
             <span><i>1</i> 실제 결제액</span>
             <span><i>2</i> 수수료 후 회수액</span>
@@ -1913,26 +2015,32 @@ export default function Home() {
           <NumberField label="현재 메소 현금 시세" value={settings.mesoPrice} suffix="원 / 1억" onChange={(value) => updateSettings("mesoPrice", value)} />
           <NumberField label="상품권 할인율" value={settings.giftDiscount} suffix="%" step={0.1} onChange={(value) => updateSettings("giftDiscount", Math.min(value, 100))} />
           <NumberField label="경매장 수수료" value={settings.auctionFee} suffix="%" step={0.1} onChange={(value) => updateSettings("auctionFee", Math.min(value, 100))} />
-          <div className={`mileage-value-setting ${settings.mileageMode === "direct" ? "direct" : ""}`}>
-            <label className="select-field">
-              <span>마일리지 가치</span>
-              <select value={settings.mileageMode} onChange={(event) => updateSettings("mileageMode", event.target.value as Settings["mileageMode"])}>
-                <option value="none">미반영</option>
-                <option value="direct">1마일리지당 직접 입력</option>
-              </select>
-            </label>
-            {settings.mileageMode === "direct" && (
-              <NumberField label="1마일리지당" value={settings.mileageWon} suffix="원" step={0.01} onChange={(value) => updateSettings("mileageWon", value)} />
-            )}
-          </div>
-          <label className="switch-row settings-switch">
-            <span><b>캐시 구매 마일리지 적립</b><small>결제 대상 캐시의 5%를 가치에서 차감</small></span>
-            <input type="checkbox" checked={settings.includeMileageEarned} onChange={(event) => updateSettings("includeMileageEarned", event.target.checked)} />
-          </label>
-          <label className="switch-row settings-switch">
-            <span><b>마일리지 30% 비교값 표시</b><small>상품 목록에 적용 전·후를 함께 표시</small></span>
-            <input type="checkbox" checked={settings.showMileage} onChange={(event) => updateSettings("showMileage", event.target.checked)} />
-          </label>
+          <section className="credit-settings-group" aria-labelledby="credit-settings-title">
+            <div className="credit-settings-heading">
+              <div>
+                <h3 id="credit-settings-title">크레딧 설정</h3>
+                <p>10,000 크레딧을 메소로 환산했을 때의 가치를 직접 입력합니다.</p>
+              </div>
+            </div>
+            <div className="credit-settings-grid">
+              <div className="credit-rate-field">
+                <span>크레딧 적립률</span>
+                <strong>{formatNumber(settings.creditEarnRate * 100)}%</strong>
+                <small>캐시 사용액의 {formatNumber(settings.creditEarnRate * 100)}%가 크레딧으로 적립됩니다.</small>
+              </div>
+              <NumberField
+                label="크레딧 환산가치"
+                value={settings.creditValuePer10000}
+                suffix="억 / 10,000C"
+                step={0.01}
+                onChange={(value) => updateSettings("creditValuePer10000", value)}
+              />
+              <label className="switch-row settings-switch credit-value-switch">
+                <span><b>크레딧 가치 반영</b><small>적립되는 크레딧의 환산가치를 전체 예상 결과에 포함합니다.</small></span>
+                <input type="checkbox" checked={settings.includeCreditValue} onChange={(event) => updateSettings("includeCreditValue", event.target.checked)} />
+              </label>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -1946,7 +2054,6 @@ export default function Home() {
           <div className="metric">
             <span>1억당 실제 현금</span>
             <strong>{formatNumber(bestCalculation.primaryPerEok)}<small>원</small></strong>
-            {settings.mileageMode === "direct" && <em>마일리지 가치 포함</em>}
           </div>
           <div className={`verdict ${bestVerdict.className}`}>
             <span>메소 직구 대비</span>
@@ -2023,8 +2130,7 @@ export default function Home() {
             <label className="sort-control">
               <span>정렬</span>
               <select value={sort} onChange={(event) => setSort(event.target.value as SortKey)}>
-                <option value="base">미적용 효율</option>
-                <option value="mileage">마일 적용 효율</option>
+                <option value="base">기본 효율</option>
                 <option value="cashAsc">캐시 가격 낮은 순</option>
                 <option value="cashDesc">캐시 가격 높은 순</option>
                 <option value="name">이름순</option>
@@ -2054,8 +2160,6 @@ export default function Home() {
             <span className="filter-label">상태·효율</span>
             <div className="filter-tabs status-filter-tabs" role="group" aria-label="상품 상태 및 효율 필터">
               <button className={statusFiltersAreClear ? "active" : ""} type="button" aria-pressed={statusFiltersAreClear} onClick={clearStatusFilters}>전체</button>
-              <button className={mileageFilter === "eligible" ? "active" : ""} type="button" aria-pressed={mileageFilter === "eligible"} onClick={() => setMileageFilter((current) => current === "eligible" ? "all" : "eligible")}>마일30 가능</button>
-              <button className={mileageFilter === "ineligible" ? "active" : ""} type="button" aria-pressed={mileageFilter === "ineligible"} onClick={() => setMileageFilter((current) => current === "ineligible" ? "all" : "ineligible")}>마일 사용 불가</button>
               <button className={activeOnly ? "active" : ""} type="button" aria-pressed={activeOnly} onClick={() => setActiveOnly((current) => !current)}>판매 가능</button>
               <button className={profitFilter === "good" ? "active" : ""} type="button" aria-pressed={profitFilter === "good"} onClick={() => setProfitFilter((current) => current === "good" ? "all" : "good")}>유리</button>
               <button className={profitFilter === "bad" ? "active" : ""} type="button" aria-pressed={profitFilter === "bad"} onClick={() => setProfitFilter((current) => current === "bad" ? "all" : "bad")}>불리</button>
@@ -2073,9 +2177,8 @@ export default function Home() {
                   <th>캐시 가격</th>
                   <th>판매 기준가</th>
                   <th>실수령 메소</th>
-                  <th>효율</th>
-                  <th>상태</th>
-                  <th><span className="visually-hidden">관리</span></th>
+                   <th>효율</th>
+                   <th><span className="visually-hidden">관리</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -2116,9 +2219,6 @@ export default function Home() {
                           <strong>{formatWon(base.primaryPerEok)}</strong>
                           <span className={`result-chip ${state.className}`}>{state.text}</span>
                         </td>
-                        <td className="summary-status-cell">
-                          {product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">사용 불가</span>}
-                        </td>
                         <td>
                           <button
                             className="accordion-toggle"
@@ -2132,12 +2232,11 @@ export default function Home() {
                       </tr>
                       {isExpanded && (
                         <tr className="product-detail-row">
-                          <td colSpan={8}>
+                          <td colSpan={7}>
                             <div className="product-accordion-panel" id={panelId}>
                               <ProductAccordionDetails
                                 product={product}
                                 priceData={productPrice}
-                                settings={settings}
                                 onPriceBasisChange={(priceBasis) => updateProductPrice(product.id, { priceBasis })}
                                 onComponentPriceChange={(componentId, key, value) => updateComponentMarketPrice(product.id, componentId, key, value)}
                                 onProductChange={(changes) => updateProduct(product.id, changes)}
@@ -2222,10 +2321,6 @@ export default function Home() {
                       <span>수량</span>
                       <input type="number" min="0" value={item.quantity} onChange={(event) => updatePlanItem(item.id, { quantity: Math.floor(safeNumber(event.target.value)) })} />
                     </label>
-                    <label className={`mini-check ${!product?.mileage30Eligible ? "disabled" : ""}`}>
-                      <input type="checkbox" disabled={!product?.mileage30Eligible} checked={item.useMileage && !!product?.mileage30Eligible} onChange={(event) => updatePlanItem(item.id, { useMileage: event.target.checked })} />
-                      <span>마일30</span>
-                    </label>
                     <button className="remove-button" type="button" aria-label={`${index + 1}번째 구성 삭제`} onClick={() => setPlan((current) => current.filter((candidate) => candidate.id !== item.id))}>×</button>
                     {overLimit && <span className="limit-warning">설정한 판매 한도 {formatNumber(productPrice?.saleLimit ?? 0)}개를 초과했어요.</span>}
                   </div>
@@ -2247,10 +2342,16 @@ export default function Home() {
             <dl>
               <div><dt>총 캐시 구매액</dt><dd>{formatNumber(planTotals.cashPurchased)}캐시</dd></div>
               <div><dt>실제 상품권 구매 비용</dt><dd>{formatWon(planTotals.actualCash)}</dd></div>
-              {settings.mileageMode === "direct" && <div><dt>마일리지 포함 경제적 비용</dt><dd>{formatWon(planTotals.economicCost)}</dd></div>}
-              <div><dt>총 사용 마일리지</dt><dd>{formatNumber(planTotals.mileageUsed)}마일</dd></div>
-              {settings.includeMileageEarned && <div><dt>예상 적립 마일리지</dt><dd>{formatNumber(planTotals.earnedMileage)}마일</dd></div>}
-              <div><dt>총 회수 메소</dt><dd>{formatEok(planTotals.netMeso)} 메소</dd></div>
+              <div><dt>본상품 판매 실수령</dt><dd>{formatEok(planTotals.netMeso)} 메소</dd></div>
+              {settings.includeCreditValue && (
+                <>
+                  <div className="credit-summary-row"><dt>적립 크레딧</dt><dd>{formatNumber(planCredit.earnedCredit)}C</dd></div>
+                  <div className="credit-summary-row"><dt>크레딧 환산 기준</dt><dd>{formatNumber(settings.creditValuePer10000, 2)}억 / 10,000C</dd></div>
+                  <div className="credit-summary-row"><dt>크레딧 평가가치</dt><dd>{formatEok(planCredit.creditValueEok)}</dd></div>
+                </>
+              )}
+              <div className="final-recovery-row"><dt>최종 예상 회수</dt><dd>{formatEok(planCredit.finalRecoveryEok)} 메소</dd></div>
+              <div><dt>최종 1억당 현금</dt><dd>{formatWon(planCashPerEok)}</dd></div>
               <div><dt>현재 시세 기준 회수 가치</dt><dd>{formatWon(planMarketValue)}</dd></div>
             </dl>
             <div className="remaining-box">
@@ -2294,7 +2395,6 @@ export default function Home() {
               <label><span>계산 가격 기준</span><select value={editor.priceBasis} onChange={(event) => setEditor({ ...editor, priceBasis: event.target.value as PriceBasis })}><option value="current">현재 최저가</option><option value="recent">최근 체결가</option></select></label>
               <label><span>예상 판매 가능 수량</span><span className="affix-input"><input type="number" min="0" value={editor.saleLimit ?? ""} placeholder="미설정" onChange={(event) => setEditor({ ...editor, saleLimit: optionalNumber(event.target.value) })} /><small>개</small></span></label>
               <label><span>마지막 가격 확인</span><input type="datetime-local" value={editor.updatedAt.slice(0, 16)} onChange={(event) => setEditor({ ...editor, updatedAt: event.target.value })} /></label>
-              <label className="editor-check"><input type="checkbox" checked={editor.mileage30Eligible} onChange={(event) => setEditor({ ...editor, mileage30Eligible: event.target.checked })} /><span><b>마일리지 30% 사용 가능</b><small>미적용·적용 효율을 함께 계산합니다.</small></span></label>
               <label><span>판매 상태</span><select value={editor.status} onChange={(event) => setEditor({ ...editor, status: event.target.value as ProductStatus, statusSource: "manual" })}>{PRODUCT_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <label><span>상태 적용 방식</span><select value={editor.statusSource} onChange={(event) => setEditor({ ...editor, statusSource: event.target.value as ProductStatusSource })}><option value="manual">직접 지정</option><option value="automatic">판매 기간으로 자동</option></select></label>
               <label><span>판매 시작일</span><input type="date" value={editor.saleStartAt ?? ""} onChange={(event) => setEditor({ ...editor, saleStartAt: event.target.value || undefined })} /></label>
@@ -2410,26 +2510,21 @@ function ProductCard({
 }) {
   const base = calculate(product, priceData, settings);
   const hasPrice = base.salePrice > 0;
-  const mileage = settings.showMileage && product.mileage30Eligible && hasPrice
-    ? calculate(product, priceData, settings, true)
-    : null;
   const isEnded = effectiveProductStatus(product) === "ended";
   const state = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
-  const mileageState = mileage ? verdict(mileage.gapPercent) : null;
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const panelId = `product-card-panel-${product.id}`;
 
   return (
     <article className={`product-card product-accordion-card panel ${expanded ? "expanded" : "collapsed"} ${isEnded ? "ended" : ""}`}>
-      <button className={`product-card-toggle${settings.showMileage ? " with-mileage" : ""}`} type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
+      <button className="product-card-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
         <span className="card-rank">{!isEnded && hasPrice ? String(rank).padStart(2, "0") : "—"}</span>
         <span className="card-product-main">
           <span className="card-product-name"><strong>{product.name}</strong></span>
           <span className="card-product-tags">
             <CategoryBadges product={product} />
             <ProductStatusBadge product={product} />
-            {product.mileage30Eligible ? <span className="yes-chip">마일30 가능</span> : <span className="no-chip">마일 불가</span>}
             {(includedCount > 1 || excludedCount > 0) && <span className="package-count">구성 {includedCount + excludedCount}개</span>}
           </span>
         </span>
@@ -2452,18 +2547,6 @@ function ProductCard({
             <em className={state.className}>{hasPrice ? `${base.gapPercent >= 0 ? "+" : ""}${formatNumber(base.gapPercent, 1)}% ${state.text}` : state.text}</em>
           </span>
         </span>
-        {settings.showMileage && (
-          <span className="card-mileage-efficiency">
-            <small>마일30 적용</small>
-            {mileage && mileageState ? (
-              <span className="card-mileage-value" aria-label={`마일리지 30% 적용 ${formatWon(mileage.primaryPerEok)}, ${formatNumber(mileage.mileageUsed)}마일, 직구 대비 ${mileage.gapPercent >= 0 ? "+" : ""}${formatNumber(mileage.gapPercent, 1)}% ${mileageState.text}`}>
-                <strong>{formatWon(mileage.primaryPerEok)}</strong>
-                <em className={mileageState.className}>{mileage.gapPercent >= 0 ? "+" : ""}{formatNumber(mileage.gapPercent, 1)}% {mileageState.text}</em>
-                <small>{formatNumber(mileage.mileageUsed)}마일</small>
-              </span>
-            ) : <strong className="card-mileage-empty">—</strong>}
-          </span>
-        )}
         <span className="chevron" aria-hidden="true">⌄</span>
       </button>
       {expanded && (
@@ -2471,7 +2554,6 @@ function ProductCard({
           <ProductAccordionDetails
             product={product}
             priceData={priceData}
-            settings={settings}
             onPriceBasisChange={onPriceBasisChange}
             onComponentPriceChange={onComponentPriceChange}
             onProductChange={onProductChange}
@@ -2486,7 +2568,6 @@ function ProductCard({
 function ProductAccordionDetails({
   product,
   priceData,
-  settings,
   onPriceBasisChange,
   onComponentPriceChange,
   onProductChange,
@@ -2494,13 +2575,11 @@ function ProductAccordionDetails({
 }: {
   product: CatalogProduct;
   priceData: ProductPriceData;
-  settings: Settings;
   onPriceBasisChange: (basis: PriceBasis) => void;
   onComponentPriceChange: (componentId: string, key: keyof ComponentMarketPrice, value: number | null) => void;
   onProductChange: (changes: Partial<CatalogProduct>) => void;
   onDetail: () => void;
 }) {
-  const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
   const includedCount = totalQuantity(product);
   const excludedCount = excludedQuantity(product);
   const hasComponentSummary = includedCount > 1 || excludedCount > 0;
@@ -2557,7 +2636,6 @@ function ProductAccordionDetails({
           <span>판매 스냅샷 {product.checkedAt}</span>
           <span>마지막 가격 확인 {formatDate(priceData.updatedAt)}</span>
           <span>판매 한도 {priceData.saleLimit ? `${formatNumber(priceData.saleLimit)}개` : "미설정"}</span>
-          {settings.showMileage && mileage && <span>마일30 {formatWon(mileage.primaryPerEok)} · {formatNumber(mileage.mileageUsed)} 마일 필요</span>}
           {priceData.note && <span>메모 · {priceData.note}</span>}
         </div>
         <div className="accordion-actions">
@@ -2629,7 +2707,6 @@ function ProductAccordionDetails({
 
 function ProductDetail({ product, priceData, settings, onEdit }: { product: CatalogProduct; priceData: ProductPriceData; settings: Settings; onEdit: () => void }) {
   const base = calculate(product, priceData, settings);
-  const mileage = product.mileage30Eligible ? calculate(product, priceData, settings, true) : null;
   const hasPrice = base.salePrice > 0;
   const baseVerdict = hasPrice ? verdict(base.gapPercent) : { text: "가격 미입력", className: "neutral" };
   const priceDivergence = divergence(product, priceData);
@@ -2647,13 +2724,11 @@ function ProductDetail({ product, priceData, settings, onEdit }: { product: Cata
         <div className="price-warning"><strong>가격 차이를 확인해 주세요.</strong><span>현재 매물과 최근 체결가의 괴리율이 {priceDivergence >= 0 ? "+" : ""}{formatNumber(priceDivergence)}%입니다. 자동으로 가격 기준을 바꾸지 않았습니다.</span></div>
       )}
       <div className="detail-result">
-        <div><span>미적용 1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "구성품 시세를 입력해 주세요"}</small></div>
+        <div><span>1억당 비용</span><strong>{formatWon(base.primaryPerEok)}</strong><small>{hasPrice ? <>직구 대비 {base.gapPercent >= 0 ? "+" : ""}{formatNumber(base.gapPercent, 1)}%</> : "구성품 시세를 입력해 주세요"}</small></div>
         <div><span>판정</span><strong className={baseVerdict.className}>{baseVerdict.text}</strong><small>{hasPrice ? <>{base.gapWon >= 0 ? "+" : ""}{formatWon(base.gapWon)} / 1억</> : "계산 대기"}</small></div>
-        {mileage && <div className="mileage-highlight"><span>마일30 적용</span><strong>{formatWon(mileage.primaryPerEok)}</strong><small>{formatNumber(mileage.mileageUsed)} 마일리지 사용</small></div>}
       </div>
       <div className="formula-grid">
-        <FormulaBlock title="A. 마일리지 미적용" calculation={base} product={product} priceData={priceData} settings={settings} />
-        {mileage && <FormulaBlock title="B. 마일리지 30% 적용" calculation={mileage} product={product} priceData={priceData} settings={settings} mileage />}
+        <FormulaBlock title="상품 판매 계산" calculation={base} product={product} priceData={priceData} settings={settings} />
       </div>
       <section className="component-detail">
         <div className="component-detail-heading"><strong>패키지 구성</strong><span>전체 {includedCount + excludedCount}개 · 합산 {includedCount}개{excludedCount > 0 ? ` · 계산 제외 ${excludedCount}개` : ""}</span></div>
@@ -2671,29 +2746,23 @@ function FormulaBlock({
   product,
   priceData,
   settings,
-  mileage = false,
 }: {
   title: string;
   calculation: ReturnType<typeof calculate>;
   product: CatalogProduct;
   priceData: ProductPriceData;
   settings: Settings;
-  mileage?: boolean;
 }) {
   return (
     <section className="formula-block">
       <h3>{title}</h3>
       <dl>
         <div><dt>캐시 정가</dt><dd>{formatNumber(product.cashPrice)}캐시</dd></div>
-        {mileage && <div><dt>현금 결제 대상</dt><dd>{formatNumber(calculation.cashFace)}캐시 <small>정가 × 70%</small></dd></div>}
         <div><dt>상품권 할인 후 현금</dt><dd>{formatWon(calculation.actualCash)} <small>{formatNumber(calculation.cashFace)} × (1 - {formatNumber(settings.giftDiscount, 1)}%)</small></dd></div>
-        {mileage && <div><dt>사용 마일리지</dt><dd>{formatNumber(calculation.mileageUsed)}마일 <small>정가 × 30%</small></dd></div>}
-        {settings.mileageMode === "direct" && mileage && <div><dt>마일리지 가치</dt><dd>{formatWon(calculation.mileageValue)} <small>{formatNumber(calculation.mileageUsed)} × {formatNumber(settings.mileageWon, 2)}원</small></dd></div>}
-        {settings.includeMileageEarned && <div><dt>예상 적립 마일리지</dt><dd>{formatNumber(calculation.earnedMileage)}마일 <small>결제 대상 캐시 × 5%</small></dd></div>}
         <div><dt>판매 기준가</dt><dd>{formatOptionalEok(calculation.salePrice)} <small>{BASIS_LABEL[priceData.priceBasis]} · 구성품 합산</small></dd></div>
         <div><dt>경매장 수수료</dt><dd>{calculation.salePrice > 0 ? `-${formatEok(calculation.salePrice - calculation.netMeso)}` : "—"} <small>{formatNumber(settings.auctionFee, 1)}%</small></dd></div>
         <div><dt>실수령 메소</dt><dd>{formatOptionalEok(calculation.netMeso)} <small>판매가 × (1 - 수수료)</small></dd></div>
-        <div className="formula-total"><dt>{settings.mileageMode === "direct" ? "경제적 총비용" : "실제 현금 지출"}</dt><dd>{formatWon(calculation.economicCost)}</dd></div>
+        <div className="formula-total"><dt>계산 반영 비용</dt><dd>{formatWon(calculation.economicCost)}</dd></div>
         <div className="formula-final"><dt>1억당 현금</dt><dd>{formatWon(calculation.primaryPerEok)} <small>총비용 ÷ 실수령 억 메소</small></dd></div>
       </dl>
     </section>

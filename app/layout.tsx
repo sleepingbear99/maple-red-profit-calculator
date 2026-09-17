@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "레드작 손익 계산기",
-  description: "상품권 할인, 경매장 수수료, 마일리지를 반영해 레드작의 실제 현금 효율과 메소 직구 대비 손익을 계산합니다.",
+  description: "상품권 할인과 경매장 수수료를 반영하고, 적립 크레딧의 추가 가치까지 계산하는 레드작 손익 도구입니다.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

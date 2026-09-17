@@ -322,7 +322,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .plan-list { margin-top: 24px; }
 .plan-list-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: #8a817a; font-size: 8px; }
 .plan-list-head span:first-child { color: white; font-size: 10px; font-weight: 600; }
-.plan-row { position: relative; display: grid; grid-template-columns: 25px minmax(180px, 1fr) 100px 68px 25px; gap: 10px; align-items: center; margin-top: 7px; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(74,59,49,.05); }
+.plan-row { position: relative; display: grid; grid-template-columns: 25px minmax(180px, 1fr) 100px 25px; gap: 10px; align-items: center; margin-top: 7px; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(74,59,49,.05); }
 .plan-row.over-limit { margin-bottom: 25px; border-color: rgba(240,171,134,.55); }
 .plan-number { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: var(--gold); background: rgba(255,255,255,.08); font-size: 8px; }
 .plan-row label { min-width: 0; }
@@ -374,7 +374,7 @@ footer > small { margin-left: auto; }
 .price-warning { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 13px 15px; border: 1px solid #ecd2b9; border-radius: 11px; color: #865326; background: #fbf1e5; }
 .price-warning strong { font-size: 9px; white-space: nowrap; }
 .price-warning span { font-size: 8px; line-height: 1.5; }
-.detail-result { display: grid; grid-template-columns: 1fr .65fr 1fr; gap: 9px; margin: 22px 0; }
+.detail-result { display: grid; grid-template-columns: 1fr .65fr; gap: 9px; margin: 22px 0; }
 .detail-result > div { padding: 16px; border: 1px solid #ded8cd; border-radius: 13px; background: #fff; }
 .detail-result span { display: block; color: #7e746c; font-size: 8px; }
 .detail-result strong { display: block; margin-top: 6px; font: 700 24px var(--font-sans); }
@@ -1678,4 +1678,48 @@ footer > small,
   .product-accordion-card,
   .chevron { transition: none; }
   .product-accordion-panel { animation: none; }
+}
+
+/* Credit valuation is an overall-plan setting, separate from product efficiency. */
+.credit-settings-group {
+  grid-column: 1 / -1;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #faf7f2;
+}
+
+.credit-settings-heading { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.credit-settings-heading h3 { margin: 0; color: #4a3b31; font: 600 18px/1.3 var(--font-sans); }
+.credit-settings-heading p { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.credit-settings-grid { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(220px, 1fr) minmax(260px, 1.15fr); gap: 12px; align-items: stretch; }
+.credit-rate-field {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+}
+.credit-rate-field > span { color: var(--muted); font-size: 14px; font-weight: 600; }
+.credit-rate-field > strong { color: #4a3b31; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.credit-rate-field > small { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.credit-settings-grid .number-field { min-width: 0; }
+.credit-value-switch { height: 100%; padding: 10px 12px; background: #fff; }
+.plan-summary .credit-summary-row { color: #765e4b; }
+.plan-summary .final-recovery-row { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.plan-summary .final-recovery-row dt,
+.plan-summary .final-recovery-row dd { color: #4a3b31; font-weight: 700; }
+
+@media (max-width: 980px) {
+  .credit-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .credit-value-switch { grid-column: 1 / -1; }
+}
+
+@media (max-width: 760px) {
+  .credit-settings-group { padding: 14px; }
+  .credit-settings-grid { grid-template-columns: 1fr; }
+  .credit-value-switch { grid-column: auto; }
 }
